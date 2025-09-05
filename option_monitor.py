@@ -1,0 +1,931 @@
+# -*- coding: utf-8 -*-
+"""
+港股期权大单监控主程序
+"""
+
+import time
+import logging
+import traceback
+import pandas as pd
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional
+import threading
+import signal
+import sys
+import os
+
+# 第三方库
+try:
+    import futu as ft
+    import akshare as ak
+    import tushare as ts
+except ImportError as e:
+    print(f"请安装必要的依赖包: {e}")
+    print("pip install futu-api akshare tushare")
+    sys.exit(1)
+
+from config import *
+from utils.logger import setup_logger
+from utils.notifier import Notifier
+from utils.data_handler import DataHandler
+from utils.mac_notifier import MacNotifier
+from utils.big_options_processor import BigOptionsProcessor
+
+
+class OptionMonitor:
+    """港股期权大单监控器"""
+    
+    def __init__(self):
+        self.logger = setup_logger()
+        self.notifier = Notifier()
+        self.data_handler = DataHandler()
+        self.mac_notifier = MacNotifier()
+        self.big_options_processor = BigOptionsProcessor()
+        self.quote_ctx = None
+        self.is_running = False
+        self.monitor_thread = None
+        self.subscribed_options = set()  # 已订阅的期权代码
+        self.stock_price_cache = {}  # 股价缓存
+        self.price_update_time = {}  # 股价更新时间
+        self.option_chain_cache = {}  # 期权链缓存: {(owner_code, expiry_date): DataFrame}
+        self.option_chain_cache_time = {}  # 期权链缓存时间
+        
+        # 初始化Futu连接
+        self._init_futu_connection()
+        
+    def _init_futu_connection(self):
+        """初始化Futu OpenD连接"""
+        try:
+            self.quote_ctx = ft.OpenQuoteContext(
+                host=str(FUTU_CONFIG['host']),
+                port=int(FUTU_CONFIG['port'])
+            )
+            
+            # 解锁交易仅适用于交易上下文(OpenHKTradeContext/USTrade/CNTrade)，行情上下文无需解锁
+            
+            # 设置股票报价处理器
+            self.quote_ctx.set_handler(StockQuoteHandler(self))
+            
+            # 订阅监控股票的报价
+            self._subscribe_stock_quotes(MONITOR_STOCKS)
+                    
+            self.logger.info("Futu OpenD连接成功")
+            
+        except Exception as e:
+            self.logger.error(f"Futu OpenD连接失败: {e}")
+            self.logger.error(traceback.format_exc())
+            raise
+    
+    def _subscribe_stock_quotes(self, stock_codes):
+        """订阅股票报价"""
+        try:
+            if not stock_codes:
+                return
+                
+            # 每次最多订阅50个，避免超出API限制
+            batch_size = 50
+            for i in range(0, len(stock_codes), batch_size):
+                batch_codes = stock_codes[i:i+batch_size]
+                
+                # 订阅股票报价
+                ret, data = self.quote_ctx.subscribe(batch_codes, [ft.SubType.QUOTE])
+                if ret == ft.RET_OK:
+                    self.logger.info(f"成功订阅 {len(batch_codes)} 只股票的报价")
+                else:
+                    self.logger.warning(f"订阅股票报价失败: {data}")
+                
+                # 避免API调用过于频繁
+                time.sleep(0.5)
+                
+        except Exception as e:
+            self.logger.error(f"订阅股票报价异常: {e}")
+            self.logger.error(traceback.format_exc())
+    
+    def get_stock_price(self, stock_code: str) -> float:
+        """获取股票当前价格（优先使用缓存）"""
+        try:
+            # 检查缓存是否有效
+            if stock_code in self.stock_price_cache and stock_code in self.price_update_time:
+                cache_time = self.price_update_time[stock_code]
+                if (datetime.now() - cache_time).seconds < 60:  # 缓存1分钟内有效
+                    self.logger.debug(f"使用缓存的股价: {stock_code} = {self.stock_price_cache[stock_code]}")
+                    return self.stock_price_cache[stock_code]
+            
+            # 缓存无效，获取实时股价
+            ret_snap, snap_data = self.quote_ctx.get_market_snapshot([stock_code])
+            if ret_snap == ft.RET_OK and not snap_data.empty:
+                price = snap_data.iloc[0]['last_price']
+                # 更新缓存
+                self.stock_price_cache[stock_code] = price
+                self.price_update_time[stock_code] = datetime.now()
+                self.logger.debug(f"获取实时股价: {stock_code} = {price}")
+                return price
+            else:
+                self.logger.warning(f"获取{stock_code}股价失败")
+                
+                # 如果缓存中有旧数据，返回旧数据
+                if stock_code in self.stock_price_cache:
+                    self.logger.debug(f"使用旧缓存的股价: {stock_code} = {self.stock_price_cache[stock_code]}")
+                    return self.stock_price_cache[stock_code]
+                
+                # 使用默认股价
+                default_prices = {
+                    'HK.00700': 600.0,  # 腾讯控股
+                    'HK.09988': 80.0,   # 阿里巴巴
+                    'HK.03690': 120.0,  # 美团
+                    'HK.01810': 12.0,   # 小米集团
+                    'HK.09618': 120.0,  # 京东集团
+                    'HK.02318': 40.0,   # 中国平安
+                    'HK.00388': 300.0,  # 香港交易所
+                }
+                
+                if stock_code in default_prices:
+                    default_price = default_prices[stock_code]
+                    self.logger.info(f"使用默认股价: {stock_code} = {default_price}")
+                    return default_price
+                
+                return 100.0  # 通用默认价格
+                
+        except Exception as e:
+            self.logger.error(f"获取{stock_code}股价异常: {e}")
+            self.logger.error(traceback.format_exc())
+            
+            # 如果缓存中有旧数据，返回旧数据
+            if stock_code in self.stock_price_cache:
+                return self.stock_price_cache[stock_code]
+            
+            return 100.0  # 默认价格
+    
+    def get_stock_options(self, stock_code: str) -> List[str]:
+        """获取指定股票的期权合约列表"""
+        try:
+            # 获取当前股价，用于筛选合适的期权
+            current_price = self.get_stock_price(stock_code)
+            self.logger.info(f"{stock_code}当前股价: {current_price}")
+            
+            # 计算价格范围（上下20%）
+            price_range = OPTION_FILTER.get('price_range', 0.2)
+            price_lower = current_price * (1 - price_range)
+            price_upper = current_price * (1 + price_range)
+            
+            # 使用API获取期权到期日
+            ret, data = self.quote_ctx.get_option_expiration_date(stock_code)
+            if ret != ft.RET_OK:
+                self.logger.error(f"获取{stock_code}期权到期日失败: {data}")
+                return []
+            
+            # 只获取最近的几个到期日（减少API调用）
+            recent_dates = data.head(3)  # 最近的3个到期日
+            
+            option_codes = []
+            # 获取每个到期日的期权合约
+            for _, row in recent_dates.iterrows():
+                # 使用正确的列名获取到期日（兼容不同版本的API）
+                expiry_date = row.get('strike_time', row.get('expiry_date'))
+                if not expiry_date:
+                    self.logger.warning(f"无法获取到期日信息: {row}")
+                    continue
+                try:
+                    # 判断是否为指数期权
+                    index_option_type = ft.IndexOptionType.INDEX if stock_code.endswith('.HSI') else ft.IndexOptionType.NORMAL
+                    
+                    # 使用完整参数获取期权链，包括价格筛选
+                    ret2, option_data = self.quote_ctx.get_option_chain(
+                        code=stock_code,
+                        start=expiry_date,
+                        end=expiry_date,
+                        option_type=ft.OptionType.ALL,
+                        option_cond_type=ft.OptionCondType.ALL,
+                        index_option_type=index_option_type
+                    )
+                    
+                    if ret2 == ft.RET_OK and not option_data.empty:
+                        # 筛选执行价格在当前股价上下范围内的期权
+                        filtered_options = option_data[
+                            (option_data['strike_price'] >= price_lower) & 
+                            (option_data['strike_price'] <= price_upper)
+                        ]
+                        
+                        # 直接使用价格筛选后的期权
+                        if not filtered_options.empty:
+                            # 如果没有活跃期权，使用价格范围内的所有期权
+                            option_codes.extend(filtered_options['code'].tolist())
+                            self.logger.debug(f"{stock_code} {expiry_date}到期的期权中有{len(filtered_options)}个在价格范围内")
+                        else:
+                            # 如果没有在范围内的，取最接近当前价格的几个
+                            option_data['price_diff'] = abs(option_data['strike_price'] - current_price)
+                            closest_options = option_data.nsmallest(5, 'price_diff')
+                            option_codes.extend(closest_options['code'].tolist())
+                            self.logger.debug(f"{stock_code} {expiry_date}添加5个最接近当前价格的期权")
+                        
+                        # 记录一些有用的期权信息，如隐含波动率
+                        if 'implied_volatility' in option_data.columns:
+                            avg_iv = option_data['implied_volatility'].mean()
+                            self.logger.debug(f"{stock_code} {expiry_date}期权平均隐含波动率: {avg_iv:.2f}%")
+                except Exception as e:
+                    self.logger.warning(f"获取{stock_code} {expiry_date}期权链异常: {e}")
+                    continue
+            
+            self.logger.debug(f"{stock_code} 期权合约数量: {len(option_codes)}")
+            return option_codes
+            
+        except Exception as e:
+            self.logger.error(f"获取{stock_code}期权合约异常: {e}")
+            self.logger.error(traceback.format_exc())
+            return []
+
+    
+    def get_option_trades(self, option_code: str) -> Optional[pd.DataFrame]:
+        """获取期权逐笔交易数据"""
+        try:
+            # 首先获取期权的基本信息
+            # 兼容：不再调用 get_option_info，改为从代码解析 + 快照补充
+            try:
+                # 使用big_options_processor中的方法解析期权代码
+                strike_price = self.big_options_processor._parse_strike_from_code(option_code)
+                # 基于末尾 C/P 的相对位置判断类型，避免被标的简称中的字母误伤
+                option_type = ('Call' if option_code.rfind('C') > option_code.rfind('P') else 'Put') if ('C' in option_code or 'P' in option_code) else '未知'
+                expiry_date = self.big_options_processor._parse_expiry_from_code(option_code)
+                option_info = {
+                    'strike_price': strike_price,
+                    'option_type': option_type,
+                    'expiry_date': expiry_date
+                }
+                # 兜底：若解析信息缺失，尝试用快照/期权链补齐，避免执行价=0或类型未知
+                try:
+                    if (not option_info.get('strike_price')) or option_info.get('option_type') in ('未知', None) or not option_info.get('expiry_date'):
+                        owner_code = None
+                        # 先尝试快照补齐
+                        ret_s2, s2 = self.quote_ctx.get_market_snapshot([option_code])
+                        if ret_s2 == ft.RET_OK and s2 is not None and not s2.empty:
+                            row2 = s2.iloc[0]
+                            # 部分环境下快照可能提供执行价/类型
+                            if 'strike_price' in s2.columns:
+                                try:
+                                    sp = float(row2.get('strike_price') or 0)
+                                    if sp > 0:
+                                        option_info['strike_price'] = sp
+                                except Exception:
+                                    pass
+                            if 'option_type' in s2.columns and row2.get('option_type') in ('Call', 'Put'):
+                                option_info['option_type'] = row2.get('option_type')
+                            # 记录正股代码供链路映射
+                            owner_code = row2.get('owner_stock_code') or row2.get('owner_code')
+                        # 若仍无执行价且拥有正股代码与到期日，则用期权链映射获取准确执行价（带缓存）
+                        if (not option_info.get('strike_price')) and owner_code and option_info.get('expiry_date'):
+                            date_str = option_info['expiry_date']
+                            cache_key = (owner_code, date_str)
+                            current_time = datetime.now()
+                            
+                            # 检查缓存（5分钟有效）
+                            oc_df = None
+                            if (cache_key in self.option_chain_cache and 
+                                cache_key in self.option_chain_cache_time and
+                                (current_time - self.option_chain_cache_time[cache_key]).seconds < 300):
+                                oc_df = self.option_chain_cache[cache_key]
+                                self.logger.debug(f"使用缓存的期权链: {cache_key}")
+                            else:
+                                # 获取新的期权链数据
+                                ret_oc, oc_df = self.quote_ctx.get_option_chain(owner_code, date_str)
+                                if ret_oc == ft.RET_OK and oc_df is not None and not oc_df.empty:
+                                    # 更新缓存
+                                    self.option_chain_cache[cache_key] = oc_df
+                                    self.option_chain_cache_time[cache_key] = current_time
+                                    self.logger.debug(f"缓存期权链数据: {cache_key}, {len(oc_df)}个期权")
+                            
+                            # 从期权链中查找匹配的期权代码
+                            if oc_df is not None and not oc_df.empty:
+                                match_df = oc_df[oc_df['code'] == option_code]
+                                if not match_df.empty:
+                                    sp2 = float(match_df.iloc[0].get('strike_price') or 0)
+                                    if sp2 > 0:
+                                        option_info['strike_price'] = sp2
+                                        self.logger.debug(f"从期权链获取执行价: {option_code} = {sp2}")
+                except Exception:
+                    # 兜底失败不影响主流程
+                    pass
+                # 若有正股代码则补充正股价差信息
+                try:
+                    ret_stock, stock_snap = self.quote_ctx.get_market_snapshot([stock_code]) if hasattr(self, 'quote_ctx') else (-1, None)
+                    if ret_stock == ft.RET_OK and stock_snap is not None and not stock_snap.empty:
+                        current_stock_price = float(stock_snap.iloc[0]['last_price'])
+                        price_diff = strike_price - current_stock_price if current_stock_price else 0
+                        price_diff_pct = (price_diff / current_stock_price) * 100 if current_stock_price else 0
+                        option_info['stock_price'] = current_stock_price
+                        option_info['price_diff'] = price_diff
+                        option_info['price_diff_pct'] = price_diff_pct
+                except Exception:
+                    pass
+            except Exception:
+                option_info = {'strike_price': 0, 'option_type': '未知', 'expiry_date': ''}
+                self.logger.debug(f"期权{option_code}基本信息: 执行价={option_info.iloc[0].get('strike_price', 0)}, 类型={option_info.iloc[0].get('option_type', '未知')}")
+            
+            # 使用API获取逐笔交易数据
+            ret, data = self.quote_ctx.get_rt_ticker(option_code)
+            if ret != ft.RET_OK:
+                self.logger.debug(f"获取{option_code}交易数据失败: {data}")
+                
+                # 如果逐笔交易获取失败，尝试获取市场快照
+                ret_snap, snap_data = self.quote_ctx.get_market_snapshot([option_code])
+                if ret_snap == ft.RET_OK and not snap_data.empty:
+                    # 从快照中提取成交量和成交额
+                    row = snap_data.iloc[0]
+                    volume = row.get('volume', 0)
+                    turnover = row.get('turnover', 0)
+                    
+                    # 检查是否符合大单条件
+                    if (volume >= OPTION_FILTER['min_volume'] and 
+                        turnover >= OPTION_FILTER['min_turnover']):
+                        
+                        # 创建一个模拟的逐笔交易数据
+                        mock_data = pd.DataFrame([{
+                            'time': datetime.now().strftime('%H:%M:%S'),
+                            'price': row.get('last_price', 0),
+                            'volume': volume,
+                            'turnover': turnover,
+                            'direction': 'Unknown'
+                        }])
+                        
+                        # 添加期权代码
+                        mock_data['option_code'] = option_code
+                        mock_data['timestamp'] = datetime.now()
+                        
+                        return mock_data
+                
+                return None
+            
+            if data.empty:
+                return None
+                
+            # 筛选大单交易
+            filtered_data = self._filter_large_trades(data, option_code)
+            return filtered_data
+            
+        except Exception as e:
+            self.logger.error(f"获取{option_code}交易数据异常: {e}")
+            self.logger.error(traceback.format_exc())
+            return None
+    
+    def _filter_large_trades(self, trades_df: pd.DataFrame, option_code: str) -> pd.DataFrame:
+        """筛选大单交易"""
+        if trades_df.empty:
+            return trades_df
+        
+        # 应用筛选条件
+        # 确保volume字段存在
+        if "volume" not in trades_df.columns:
+            self.logger.warning(f"trades_df中不存在volume字段，无法筛选大单")
+            return pd.DataFrame()
+        
+        mask = (
+            (trades_df['volume'] >= OPTION_FILTER['min_volume']) &
+            (trades_df['turnover'] >= OPTION_FILTER['min_turnover'])
+        )
+        
+        large_trades = trades_df[mask].copy()
+        
+        if not large_trades.empty:
+            large_trades['option_code'] = option_code
+            large_trades['timestamp'] = datetime.now()
+            
+        return large_trades
+    
+    def monitor_single_stock(self, stock_code: str):
+        """监控单个股票的期权大单"""
+        try:
+            # 获取期权合约列表
+            option_codes = self.get_stock_options(stock_code)
+            if not option_codes:
+                return
+            
+            all_large_trades = []
+            
+            # 监控每个期权合约
+            for option_code in option_codes:
+                large_trades = self.get_option_trades(option_code)
+                if large_trades is not None and not large_trades.empty:
+                    all_large_trades.append(large_trades)
+            
+            # 处理发现的大单交易
+            if all_large_trades:
+                combined_trades = pd.concat(all_large_trades, ignore_index=True)
+                self._process_large_trades(stock_code, combined_trades)
+                
+        except Exception as e:
+            self.logger.error(f"监控{stock_code}异常: {e}")
+            self.logger.error(traceback.format_exc())
+    
+    def _process_large_trades(self, stock_code: str, trades_df: pd.DataFrame):
+        """处理发现的大单交易"""
+        for _, trade in trades_df.iterrows():
+            # 规范化成交时间
+            try:
+                t_str = str(trade.get('time', ''))
+                if (len(t_str) >= 10 and ('-' in t_str or '/' in t_str)):
+                    time_full = t_str.split('.')[0]
+                else:
+                    time_full = f"{datetime.now().strftime('%Y-%m-%d')} {t_str}"
+            except Exception:
+                time_full = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            trade_info = {
+                'stock_code': stock_code,
+                'option_code': trade['option_code'],
+                'time': trade['time'],
+                'time_full': time_full,
+                'price': trade['price'],
+                'volume': trade['volume'],
+                'turnover': trade['turnover'],
+                'direction': trade.get('direction', 'Unknown'),
+                'timestamp': trade['timestamp']
+            }
+            
+            # 发送通知
+            self.notifier.send_notification(trade_info)
+            
+            # 保存数据
+            self.data_handler.save_trade(trade_info)
+            
+            self.logger.info(f"发现大单: {stock_code} {trade_info}")
+    
+    def _is_trading_time(self) -> bool:
+        """检查是否在交易时间内"""
+        now = datetime.now().time()
+        start_time = datetime.strptime(MONITOR_TIME['start_time'], '%H:%M:%S').time()
+        end_time = datetime.strptime(MONITOR_TIME['end_time'], '%H:%M:%S').time()
+        
+        return start_time <= now <= end_time
+    
+    def _monitor_loop(self):
+        """监控主循环 - 1分钟执行一次完整大单汇总"""
+        self.logger.info("开始1分钟间隔监控港股期权大单交易（每次执行完整大单汇总）")
+        
+        # 设置期权推送回调
+        self.quote_ctx.set_handler(OptionTickerHandler(self))
+        
+        # 确保股票报价订阅是最新的
+        self._subscribe_stock_quotes(MONITOR_STOCKS)
+        
+        while self.is_running:
+            try:
+                # 每分钟执行一次完整的大单汇总
+                self.logger.info("执行完整大单汇总...")
+                self._hourly_big_options_check()
+                
+                # 更新订阅的期权列表
+                self._update_option_subscriptions()
+                
+                # 刷新股票报价订阅
+                self._subscribe_stock_quotes(MONITOR_STOCKS)
+                
+                # 等待下一次监控 (1分钟)
+                time.sleep(MONITOR_TIME['interval'])
+                
+            except KeyboardInterrupt:
+                self.logger.info("收到停止信号")
+                break
+            except Exception as e:
+                self.logger.error(f"监控循环异常: {e}")
+                self.logger.error(traceback.format_exc())
+                time.sleep(10)  # 异常后等待10秒再继续
+    
+    def _quick_options_check(self):
+        """快速期权检查 - 1分钟间隔"""
+        try:
+            if not self._is_trading_time():
+                return
+            
+            # 检查连接状态
+            if not self.quote_ctx:
+                return
+            
+            # 只检查前3个股票，避免API调用过于频繁
+            quick_stocks = MONITOR_STOCKS[:3]
+            
+            for stock_code in quick_stocks:
+                if not self.is_running:
+                    break
+                    
+                try:
+                    # 获取少量期权合约进行快速检查
+                    option_codes = self.get_stock_options(stock_code)
+                    
+                    if option_codes:
+                        # 只检查前5个最活跃的期权
+                        check_codes = option_codes[:5]
+                        
+                        # 订阅这些期权的逐笔推送
+                        self._subscribe_options(check_codes)
+                        
+                        # 同时进行主动检查
+                        for option_code in check_codes:
+                            trades_df = self.get_option_trades(option_code)
+                            if trades_df is not None and not trades_df.empty:
+                                # 发现大单，立即通知
+                                for _, trade in trades_df.iterrows():
+                                    # 规范化成交时间
+                                    try:
+                                        t_str = str(trade.get('time', ''))
+                                        if (len(t_str) >= 10 and ('-' in t_str or '/' in t_str)):
+                                            time_full = t_str.split('.')[0]
+                                        else:
+                                            time_full = f"{datetime.now().strftime('%Y-%m-%d')} {t_str}"
+                                    except Exception:
+                                        time_full = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+                                    trade_info = {
+                                        'stock_code': stock_code,
+                                        'option_code': trade['option_code'],
+                                        'time': trade['time'],
+                                        'time_full': time_full,
+                                        'price': trade['price'],
+                                        'volume': trade['volume'],
+                                        'turnover': trade['turnover'],
+                                        'direction': trade.get('direction', 'Unknown'),
+                                        'timestamp': trade['timestamp']
+                                    }
+                                    
+                                    self.notifier.send_notification(trade_info)
+                                    self.data_handler.save_trade(trade_info)
+                                
+                                self.logger.info(f"快速检查发现 {len(trades_df)} 笔大单: {stock_code} - {option_code}")
+                                
+                except Exception as e:
+                    self.logger.debug(f"快速检查{stock_code}失败: {e}")
+                    self.logger.debug(traceback.format_exc())
+                    
+        except Exception as e:
+            self.logger.error(f"快速期权检查失败: {e}")
+            self.logger.error(traceback.format_exc())
+    
+    def _hourly_big_options_check(self):
+        """完整大单期权检查（每分钟执行一次）"""
+        try:
+            self.logger.info("开始执行完整大单期权检查...")
+            
+            # 检查连接状态
+            if not self.quote_ctx:
+                self.logger.error("Futu连接已断开，尝试重新连接...")
+                self._init_futu_connection()
+                if not self.quote_ctx:
+                    self.logger.error("重新连接失败，跳过本次检查")
+                    return
+            
+            # 获取最近2天的大单期权
+            big_options = self.big_options_processor.get_recent_big_options(
+                self.quote_ctx, MONITOR_STOCKS
+            )
+            
+            if big_options:
+                self.logger.info(f"发现 {len(big_options)} 笔大单期权交易")
+                
+                # 保存汇总数据
+                self.big_options_processor.save_big_options_summary(big_options)
+                
+                # 发送Mac通知
+                if NOTIFICATION.get('enable_mac_notification', False):
+                    try:
+                        self.mac_notifier.send_big_options_summary(big_options)
+                    except Exception as e:
+                        self.logger.warning(f"Mac通知发送失败: {e}")
+                
+                # 发送企业微信通知
+                if NOTIFICATION.get('enable_wework_bot', False):
+                    try:
+                        self.notifier.send_big_options_summary(big_options)
+                    except Exception as e:
+                        self.logger.warning(f"企业微信汇总通知发送失败: {e}")
+                
+                # 控制台通知
+                if NOTIFICATION.get('enable_console', True):
+                    self._print_big_options_summary(big_options)
+                
+            else:
+                self.logger.info("未发现符合条件的大单期权交易")
+                # 仍然保存空的汇总，更新时间戳
+                self.big_options_processor.save_big_options_summary([])
+                
+        except Exception as e:
+            self.logger.error(f"每小时大单检查失败: {e}")
+            self.logger.error(traceback.format_exc())
+    
+    def _print_big_options_summary(self, big_options: List[Dict]):
+        """打印大单期权汇总"""
+        print("\n" + "="*60)
+        print(f"🚨 港股期权大单汇总 ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
+        print("="*60)
+        
+        total_turnover = sum(opt.get('turnover', 0) for opt in big_options)
+        print(f"📊 总计: {len(big_options)} 笔大单，总金额: {total_turnover/10000:.1f}万港币")
+        
+        # 按股票分组显示
+        stock_groups = {}
+        for opt in big_options:
+            stock_code = opt.get('stock_code', 'Unknown')
+            if stock_code not in stock_groups:
+                stock_groups[stock_code] = []
+            stock_groups[stock_code].append(opt)
+        
+        for stock_code, options in stock_groups.items():
+            stock_turnover = sum(opt.get('turnover', 0) for opt in options)
+            # 获取股票名称（从第一个期权信息中提取）
+            stock_name = options[0].get('stock_name', '') if options else ''
+            stock_display = f"{stock_code} {stock_name}" if stock_name else stock_code
+            print(f"\n📈 {stock_display}: {len(options)}笔, {stock_turnover/10000:.1f}万港币")
+            
+            # 显示前3笔最大的交易
+            top_options = sorted(options, key=lambda x: x.get('turnover', 0), reverse=True)[:3]
+            for i, opt in enumerate(top_options, 1):
+                # 选择展示时间：优先 time_full，其次 time，最后 timestamp
+                show_time = opt.get('time_full') or opt.get('time')
+                if not show_time and opt.get('timestamp'):
+                    try:
+                        show_time = opt['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
+                    except Exception:
+                        show_time = ''
+                time_suffix = f", 成交时间: {show_time}" if show_time else ""
+
+                # 添加买卖方向显示
+                direction = opt.get('direction', 'Unknown')
+                direction_text = ""
+                if direction == "BUY":
+                    direction_text = "买入"
+                elif direction == "SELL":
+                    direction_text = "卖出"
+                elif direction == "NEUTRAL":
+                    direction_text = "中性"
+                
+                direction_display = f", {direction_text}" if direction_text else ""
+                
+                print(f"   {i}. {opt.get('option_code', 'N/A')}: "
+                      f"{opt.get('volume', 0):,}手, "
+                      f"{opt.get('turnover', 0)/10000:.1f}万港币{direction_display}{time_suffix}")
+        
+        print("="*60 + "\n")
+    
+    def start_monitoring(self):
+        """启动监控"""
+        if self.is_running:
+            self.logger.warning("监控已在运行中")
+            return
+        
+        self.is_running = True
+        self.monitor_thread = threading.Thread(target=self._monitor_loop)
+        self.monitor_thread.daemon = True
+        self.monitor_thread.start()
+        
+        self.logger.info("期权大单监控已启动")
+    
+    def _subscribe_options(self, option_codes):
+        """订阅期权的逐笔推送"""
+        try:
+            # 过滤出尚未订阅的期权
+            new_codes = [code for code in option_codes if code not in self.subscribed_options]
+            
+            if not new_codes:
+                return
+                
+            # 每次最多订阅5个，避免超出API限制
+            batch_size = 5
+            for i in range(0, len(new_codes), batch_size):
+                batch_codes = new_codes[i:i+batch_size]
+                
+                # 订阅逐笔推送
+                ret, data = self.quote_ctx.subscribe(batch_codes, [ft.SubType.TICKER])
+                if ret == ft.RET_OK:
+                    self.logger.debug(f"成功订阅 {len(batch_codes)} 个期权的逐笔推送")
+                    # 更新已订阅列表
+                    self.subscribed_options.update(batch_codes)
+                else:
+                    self.logger.warning(f"订阅期权推送失败: {data}")
+                
+                # 避免API调用过于频繁
+                time.sleep(0.5)
+                
+        except Exception as e:
+            self.logger.error(f"订阅期权推送异常: {e}")
+            self.logger.error(traceback.format_exc())
+    
+    def _update_option_subscriptions(self):
+        """更新期权订阅列表"""
+        try:
+            # 取消所有现有订阅
+            if self.subscribed_options:
+                try:
+                    self.quote_ctx.unsubscribe_all()
+                    self.logger.info("已取消所有订阅，准备更新")
+                    self.subscribed_options.clear()
+                except Exception as e:
+                    self.logger.warning(f"取消订阅异常: {e}")
+                    self.logger.warning(traceback.format_exc())
+            
+            # 获取最活跃的期权进行订阅
+            active_options = []
+            
+            for stock_code in MONITOR_STOCKS[:5]:  # 只处理前5个股票
+                try:
+                    option_codes = self.get_stock_options(stock_code)
+                    if option_codes:
+                        # 每个股票取前5个期权
+                        active_options.extend(option_codes[:5])
+                except Exception as e:
+                    self.logger.debug(f"获取{stock_code}期权失败: {e}")
+                    self.logger.debug(traceback.format_exc())
+            
+            # 订阅这些期权
+            self._subscribe_options(active_options)
+            
+        except Exception as e:
+            self.logger.error(f"更新期权订阅异常: {e}")
+            self.logger.error(traceback.format_exc())
+    
+    def stop_monitoring(self):
+        """停止监控"""
+        self.is_running = False
+        if self.monitor_thread and self.monitor_thread.is_alive():
+            self.monitor_thread.join(timeout=5)
+        
+        if self.quote_ctx:
+            # 取消所有订阅
+            try:
+                self.quote_ctx.unsubscribe_all()
+                self.logger.info("已取消所有订阅")
+            except Exception as e:
+                self.logger.warning(f"取消订阅异常: {e}")
+            
+            # 关闭连接
+            self.quote_ctx.close()
+        
+        self.logger.info("期权大单监控已停止")
+    
+    def get_monitoring_status(self) -> Dict:
+        """获取监控状态"""
+        return {
+            'is_running': self.is_running,
+            'monitored_stocks': MONITOR_STOCKS,
+            'filter_conditions': OPTION_FILTER,
+            'trading_time': self._is_trading_time()
+        }
+
+
+def signal_handler(signum, frame):
+    """信号处理器"""
+    print("\n收到停止信号，正在关闭监控...")
+    if 'monitor' in globals():
+        monitor.stop_monitoring()
+    sys.exit(0)
+
+
+# 股票报价处理器
+class StockQuoteHandler(ft.StockQuoteHandlerBase):
+    """股票报价推送处理器"""
+    
+    def __init__(self, monitor):
+        super().__init__()
+        self.monitor = monitor
+        self.logger = monitor.logger
+    
+    def on_recv_rsp(self, rsp_pb):
+        """收到报价推送回调"""
+        ret_code, data = super().on_recv_rsp(rsp_pb)
+        if ret_code != ft.RET_OK:
+            self.logger.error(f"股票报价推送错误: {data}")
+            return ret_code, data
+        
+        # 处理推送数据
+        if data.empty:
+            return ret_code, data
+        
+        # 更新股价缓存
+        for _, row in data.iterrows():
+            stock_code = row['code']
+            last_price = row['last_price']
+            
+            # 更新缓存
+            self.monitor.stock_price_cache[stock_code] = last_price
+            self.monitor.price_update_time[stock_code] = datetime.now()
+            
+            # 记录股价变动
+            self.logger.debug(f"股价更新: {stock_code} = {last_price}")
+        
+        return ret_code, data
+
+
+# 期权行情推送处理器
+class OptionTickerHandler(ft.TickerHandlerBase):
+    """期权逐笔成交推送处理器"""
+    
+    def __init__(self, monitor):
+        super().__init__()
+        self.monitor = monitor
+        self.logger = monitor.logger
+    
+    def on_recv_rsp(self, rsp_pb):
+        """收到逐笔推送回调"""
+        ret_code, data = super().on_recv_rsp(rsp_pb)
+        if ret_code != ft.RET_OK:
+            self.logger.error(f"期权逐笔推送错误: {data}")
+            return ret_code, data
+        
+        # 处理推送数据
+        if data.empty:
+            return ret_code, data
+        
+        # 获取期权代码
+        option_code = data['code'].iloc[0]
+        
+        # 筛选大单
+        for _, row in data.iterrows():
+            volume = row.get("volume", 0)
+            turnover = row.get("price", 0) * volume
+            
+            # 检查是否符合大单条件
+            if volume >= OPTION_FILTER['min_volume'] and turnover >= OPTION_FILTER['min_turnover']:
+                self.logger.info(f"🔔 推送发现大单: {option_code}, 成交量: {volume}, 成交额: {turnover:.2f}")
+                
+                # 规范化成交时间
+                try:
+                    t_str = str(row.get('time', ''))
+                    if (len(t_str) >= 10 and ('-' in t_str or '/' in t_str)):
+                        time_full = t_str.split('.')[0]
+                    else:
+                        time_full = f"{datetime.now().strftime('%Y-%m-%d')} {t_str}"
+                except Exception:
+                    time_full = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+                # 构建交易信息
+                trade_info = {
+                    'option_code': option_code,
+                    'time': row['time'],
+                    'time_full': time_full,
+                    'price': row['price'],
+                    'volume': volume,
+                    'turnover': turnover,
+                    'direction': row.get('ticker_direction', 'Unknown'),
+                    'timestamp': datetime.now()
+                }
+                
+                # 获取对应的股票代码
+                stock_code = self._extract_stock_code(option_code)
+                if stock_code:
+                    trade_info['stock_code'] = stock_code
+                    
+                    # 发送通知
+                    self.monitor.notifier.send_notification(trade_info)
+                    
+                    # 保存数据
+                    self.monitor.data_handler.save_trade(trade_info)
+        
+        return ret_code, data
+    
+    def _extract_stock_code(self, option_code):
+        """从期权代码提取股票代码"""
+        try:
+            # 期权代码格式通常为 HK.00700C2309A
+            if option_code.startswith('HK.'):
+                # 提取股票代码部分
+                parts = option_code[3:].split('C')
+                if len(parts) > 1:
+                    stock_code = parts[0]
+                    return f"HK.{stock_code}"
+                
+                parts = option_code[3:].split('P')
+                if len(parts) > 1:
+                    stock_code = parts[0]
+                    return f"HK.{stock_code}"
+            
+            return None
+        except:
+            return None
+
+
+def main():
+    """主函数"""
+    # 注册信号处理器
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # 创建必要的目录
+    os.makedirs('logs', exist_ok=True)
+    os.makedirs('data', exist_ok=True)
+    
+    try:
+        # 创建监控器实例
+        global monitor
+        monitor = OptionMonitor()
+        
+        # 启动监控
+        monitor.start_monitoring()
+        
+        # 保持程序运行
+        while True:
+            time.sleep(1)
+            
+    except Exception as e:
+        print(f"程序启动失败: {e}")
+        traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

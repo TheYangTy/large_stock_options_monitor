@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>期权链数据分析</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            padding-top: 20px;
+            background-color: #f8f9fa;
+        }
+        .card {
+            margin-bottom: 20px;
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+            border-radius: 0.5rem;
+        }
+        .card-header {
+            background-color: #f1f8ff;
+            border-bottom: 1px solid #d1e9ff;
+            font-weight: 600;
+        }
+        .table th {
+            font-weight: 600;
+            background-color: #f8f9fa;
+        }
+        .otm-row {
+            background-color: #f8f9fa;
+        }
+        .itm-row {
+            background-color: #fff3cd;
+        }
+        .atm-row {
+            background-color: #e2f0d9;
+        }
+        .call-badge {
+            background-color: #28a745;
+            color: white;
+        }
+        .put-badge {
+            background-color: #dc3545;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">期权链数据分析</h5>
+                        <div>
+                            <a href="/" class="btn btn-sm btn-outline-primary">返回大单监控</a>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <form id="optionForm" class="mb-4">
+                            <div class="row g-3">
+                                <div class="col-md-3">
+                                    <label for="stockCode" class="form-label">股票代码</label>
+                                    <select class="form-select" id="stockCode" name="stockCode" required>
+                                        <option value="HK.00700">腾讯控股 (HK.00700)</option>
+                                        <option value="HK.09988">阿里巴巴 (HK.09988)</option>
+                                        <option value="HK.03690">美团 (HK.03690)</option>
+                                        <option value="HK.01810">小米集团 (HK.01810)</option>
+                                        <option value="HK.09618">京东集团 (HK.09618)</option>
+                                        <option value="HK.02318">中国平安 (HK.02318)</option>
+                                        <option value="HK.00388">香港交易所 (HK.00388)</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="optionType" class="form-label">期权类型</label>
+                                    <div class="form-control border-0">
+                                        <div class="form-check form-check-inline">
+                                            <input class="form-check-input" type="radio" name="optionType" id="callOption" value="call" checked>
+                                            <label class="form-check-label" for="callOption">看涨期权</label>
+                                        </div>
+                                        <div class="form-check form-check-inline">
+                                            <input class="form-check-input" type="radio" name="optionType" id="putOption" value="put">
+                                            <label class="form-check-label" for="putOption">看跌期权</label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="expiryDate" class="form-label">到期日</label>
+                                    <select class="form-select" id="expiryDate" name="expiryDate" required>
+                                        <option value="">加载中...</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="moneyness" class="form-label">价值筛选</label>
+                                    <select class="form-select" id="moneyness" name="moneyness">
+                                        <option value="otm" selected>仅虚值期权</option>
+                                        <option value="itm">仅实值期权</option>
+                                        <option value="all">全部期权</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row mt-3">
+                                <div class="col-12">
+                                    <label for="priceRange" class="form-label">价格范围 (当前股价的百分比)</label>
+                                    <div class="d-flex align-items-center">
+                                        <input type="range" class="form-range flex-grow-1" id="priceRange" name="priceRange" min="20" max="100" value="50">
+                                        <span class="ms-2" id="priceRangeValue">±50%</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row mt-3">
+                                <div class="col-12 text-center">
+                                    <button type="submit" class="btn btn-primary">查询期权数据</button>
+                                </div>
+                            </div>
+                        </form>
+                        
+                        <div id="loadingIndicator" class="text-center py-4" style="display: none;">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">加载中...</span>
+                            </div>
+                            <p class="mt-2">正在加载期权数据...</p>
+                        </div>
+                        
+                        <div id="optionDataContainer" style="display: none;">
+                            <div class="alert alert-info" id="stockPriceInfo">
+                                当前股价: <span id="currentStockPrice">0.00</span> | 
+                                价格范围: <span id="priceLowerBound">0.00</span> - <span id="priceUpperBound">0.00</span>
+                            </div>
+                            
+                            <div class="table-responsive">
+                                <table class="table table-hover" id="optionChainTable">
+                                    <thead>
+                                        <tr>
+                                            <th>期权代码</th>
+                                            <th>执行价格</th>
+                                            <th>价值状态</th>
+                                            <th>最新价</th>
+                                            <th>涨跌幅</th>
+                                            <th>成交量</th>
+                                            <th>持仓量</th>
+                                            <th>隐含波动率</th>
+                                            <th>Delta</th>
+                                            <th>Gamma</th>
+                                            <th>Theta</th>
+                                            <th>Vega</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="optionChainBody">
+                                        <!-- 期权数据将在这里动态加载 -->
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            <div class="row mt-4">
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-header">隐含波动率微笑曲线</div>
+                                        <div class="card-body">
+                                            <canvas id="ivSmileChart"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-header">期权希腊字母分析</div>
+                                        <div class="card-body">
+                                            <canvas id="greeksChart"></canvas>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="noDataMessage" class="alert alert-warning text-center" style="display: none;">
+                            未找到符合条件的期权数据
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script>
+        // 全局变量
+        let ivSmileChart = null;
+        let greeksChart = null;
+        
+        // 页面加载完成后执行
+        document.addEventListener('DOMContentLoaded', function() {
+            // 初始化价格范围显示
+            updatePriceRangeDisplay();
+            
+            // 监听价格范围滑块变化
+            document.getElementById('priceRange').addEventListener('input', updatePriceRangeDisplay);
+            
+            // 监听股票代码变化，加载对应的到期日
+            document.getElementById('stockCode').addEventListener('change', loadExpiryDates);
+            
+            // 监听表单提交
+            document.getElementById('optionForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                loadOptionChainData();
+            });
+            
+            // 初始加载到期日
+            loadExpiryDates();
+        });
+        
+        // 更新价格范围显示
+        function updatePriceRangeDisplay() {
+            const rangeValue = document.getElementById('priceRange').value;
+            document.getElementById('priceRangeValue').textContent = `±${rangeValue}%`;
+        }
+        
+        // 加载到期日
+        function loadExpiryDates() {
+            const stockCode = document.getElementById('stockCode').value;
+            const expiryDateSelect = document.getElementById('expiryDate');
+            
+            // 清空现有选项
+            expiryDateSelect.innerHTML = '<option value="">加载中...</option>';
+            
+            // 请求到期日数据
+            fetch(`/api/option_expiry_dates?stock_code=${stockCode}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success' && data.expiry_dates && data.expiry_dates.length > 0) {
+                        // 清空加载中选项
+                        expiryDateSelect.innerHTML = '';
+                        
+                        // 添加到期日选项
+                        data.expiry_dates.forEach(date => {
+                            const option = document.createElement('option');
+                            option.value = date;
+                            option.textContent = date;
+                            expiryDateSelect.appendChild(option);
+                        });
+                        
+                        // 默认选择第一个到期日
+                        expiryDateSelect.value = data.expiry_dates[0];
+                    } else {
+                        expiryDateSelect.innerHTML = '<option value="">无可用到期日</option>';
+                    }
+                })
+                .catch(error => {
+                    console.error('获取到期日失败:', error);
+                    expiryDateSelect.innerHTML = '<option value="">加载失败</option>';
+                });
+        }
+        
+        // 加载期权链数据
+        function loadOptionChainData() {
+            // 获取表单数据
+            const stockCode = document.getElementById('stockCode').value;
+            const optionType = document.querySelector('input[name="optionType"]:checked').value;
+            const expiryDate = document.getElementById('expiryDate').value;
+            const moneyness = document.getElementById('moneyness').value;
+            const priceRange = document.getElementById('priceRange').value;
+            
+            // 显示加载指示器
+            document.getElementById('loadingIndicator').style.display = 'block';
+            document.getElementById('optionDataContainer').style.display = 'none';
+            document.getElementById('noDataMessage').style.display = 'none';
+            
+            // 请求期权链数据
+            fetch(`/api/option_chain?stock_code=${stockCode}&option_type=${optionType}&expiry_date=${expiryDate}&moneyness=${moneyness}&price_range=${priceRange}`)
+                .then(response => response.json())
+                .then(data => {
+                    // 隐藏加载指示器
+                    document.getElementById('loadingIndicator').style.display = 'none';
+                    
+                    if (data.status === 'success' && data.options && data.options.length > 0) {
+                        // 显示数据容器
+                        document.getElementById('optionDataContainer').style.display = 'block';
+                        
+                        // 更新股价信息
+                        document.getElementById('currentStockPrice').textContent = data.stock_price.toFixed(2);
+                        document.getElementById('priceLowerBound').textContent = data.price_lower_bound.toFixed(2);
+                        document.getElementById('priceUpperBound').textContent = data.price_upper_bound.toFixed(2);
+                        
+                        // 更新期权链表格
+                        updateOptionChainTable(data.options, data.stock_price, optionType);
+                        
+                        // 更新图表
+                        updateCharts(data.options, data.stock_price, optionType);
+                    } else {
+                        // 显示无数据消息
+                        document.getElementById('noDataMessage').style.display = 'block';
+                    }
+                })
+                .catch(error => {
+                    console.error('获取期权链数据失败:', error);
+                    document.getElementById('loadingIndicator').style.display = 'none';
+                    document.getElementById('noDataMessage').style.display = 'block';
+                    document.getElementById('noDataMessage').textContent = '获取期权数据失败，请稍后再试';
+                });
+        }
+        
+        // 更新期权链表格
+        function updateOptionChainTable(options, stockPrice, optionType) {
+            const tableBody = document.getElementById('optionChainBody');
+            tableBody.innerHTML = '';
+            
+            options.forEach(option => {
+                const row = document.createElement('tr');
+                
+                // 判断期权是虚值还是实值
+                let moneyness = '';
+                let rowClass = '';
+                
+                if (optionType === 'call') {
+                    if (option.strike_price > stockPrice) {
+                        moneyness = '虚值';
+                        rowClass = 'otm-row';
+                    } else if (option.strike_price < stockPrice) {
+                        moneyness = '实值';
+                        rowClass = 'itm-row';
+                    } else {
+                        moneyness = '平值';
+                        rowClass = 'atm-row';
+                    }
+                } else { // put
+                    if (option.strike_price < stockPrice) {
+                        moneyness = '虚值';
+                        rowClass = 'otm-row';
+                    } else if (option.strike_price > stockPrice) {
+                        moneyness = '实值';
+                        rowClass = 'itm-row';
+                    } else {
+                        moneyness = '平值';
+                        rowClass = 'atm-row';
+                    }
+                }
+                
+                row.className = rowClass;
+                
+                row.innerHTML = `
+                    <td>${option.option_code}</td>
+                    <td>${option.strike_price.toFixed(2)}</td>
+                    <td>${moneyness}</td>
+                    <td>${option.last_price.toFixed(4)}</td>
+                    <td>${option.change_percent.toFixed(2)}%</td>
+                    <td>${option.volume.toLocaleString()}</td>
+                    <td>${option.open_interest.toLocaleString()}</td>
+                    <td>${(option.implied_volatility * 100).toFixed(2)}%</td>
+                    <td>${option.delta.toFixed(4)}</td>
+                    <td>${option.gamma.toFixed(4)}</td>
+                    <td>${option.theta.toFixed(4)}</td>
+                    <td>${option.vega.toFixed(4)}</td>
+                `;
+                
+                tableBody.appendChild(row);
+            });
+        }
+        
+        // 更新图表
+        function updateCharts(options, stockPrice, optionType) {
+            // 准备数据
+            const strikePrice = options.map(option => option.strike_price);
+            const impliedVolatility = options.map(option => option.implied_volatility);
+            const delta = options.map(option => option.delta);
+            const gamma = options.map(option => option.gamma * 10); // 放大gamma以便于可视化
+            const theta = options.map(option => option.theta / 100); // 缩小theta以便于可视化
+            const vega = options.map(option => option.vega / 10); // 缩小vega以便于可视化
+            
+            // 分离虚值和实值期权数据
+            const otmStrikePrice = [];
+            const otmImpliedVolatility = [];
+            const itmStrikePrice = [];
+            const itmImpliedVolatility = [];
+            
+            options.forEach(option => {
+                if (optionType === 'call') {
+                    if (option.strike_price > stockPrice) {
+                        otmStrikePrice.push(option.strike_price);
+                        otmImpliedVolatility.push(option.implied_volatility);
+                    } else {
+                        itmStrikePrice.push(option.strike_price);
+                        itmImpliedVolatility.push(option.implied_volatility);
+                    }
+                } else { // put
+                    if (option.strike_price < stockPrice) {
+                        otmStrikePrice.push(option.strike_price);
+                        otmImpliedVolatility.push(option.implied_volatility);
+                    } else {
+                        itmStrikePrice.push(option.strike_price);
+                        itmImpliedVolatility.push(option.implied_volatility);
+                    }
+                }
+            });
+            
+            // 更新隐含波动率微笑曲线
+            if (ivSmileChart) {
+                ivSmileChart.destroy();
+            }
+            
+            const ivCtx = document.getElementById('ivSmileChart').getContext('2d');
+            ivSmileChart = new Chart(ivCtx, {
+                type: 'line',
+                data: {
+                    datasets: [
+                        {
+                            label: '虚值期权',
+                            data: otmStrikePrice.map((x, i) => ({ x, y: otmImpliedVolatility[i] })),
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            pointRadius: 4,
+                            tension: 0.1
+                        },
+                        {
+                            label: '实值期权',
+                            data: itmStrikePrice.map((x, i) => ({ x, y: itmImpliedVolatility[i] })),
+                            borderColor: 'rgba(255, 159, 64, 1)',
+                            backgroundColor: 'rgba(255, 159, 64, 0.2)',
+                            pointRadius: 4,
+                            tension: 0.1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '隐含波动率微笑曲线'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `执行价格: ${context.parsed.x.toFixed(2)}, IV: ${(context.parsed.y * 100).toFixed(2)}%`;
+                                }
+                            }
+                        },
+                        annotation: {
+                            annotations: {
+                                line1: {
+                                    type: 'line',
+                                    xMin: stockPrice,
+                                    xMax: stockPrice,
+                                    borderColor: 'rgba(255, 99, 132, 1)',
+                                    borderWidth: 2,
+                                    borderDash: [5, 5],
+                                    label: {
+                                        content: `当前股价: ${stockPrice.toFixed(2)}`,
+                                        enabled: true,
+                                        position: 'top'
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: '执行价格'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: '隐含波动率'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return (value * 100).toFixed(0) + '%';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            
+            // 更新希腊字母分析图
+            if (greeksChart) {
+                greeksChart.destroy();
+            }
+            
+            const greeksCtx = document.getElementById('greeksChart').getContext('2d');
+            greeksChart = new Chart(greeksCtx, {
+                type: 'line',
+                data: {
+                    labels: strikePrice.map(price => price.toFixed(2)),
+                    datasets: [
+                        {
+                            label: 'Delta',
+                            data: delta,
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            borderWidth: 2,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Gamma (x10)',
+                            data: gamma,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            borderWidth: 2,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Theta (/100)',
+                            data: theta,
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            borderWidth: 2,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Vega (/10)',
+                            data: vega,
+                            borderColor: 'rgba(153, 102, 255, 1)',
+                            backgroundColor: 'rgba(153, 102, 255, 0.2)',
+                            borderWidth: 2,
+                            tension: 0.1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: '期权希腊字母分析'
+                        },
+                        tooltip: {
+                            callbacks: {
+                                title: function(context) {
+                                    return `执行价格: ${context[0].label}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: '执行价格'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: '希腊字母值'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>

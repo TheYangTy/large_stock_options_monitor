@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>港股期权大单监控</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            padding-top: 20px;
+            background-color: #f8f9fa;
+        }
+        .card {
+            margin-bottom: 20px;
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+            border-radius: 0.5rem;
+        }
+        .card-header {
+            background-color: #f1f8ff;
+            border-bottom: 1px solid #d1e9ff;
+            font-weight: 600;
+        }
+        .table th {
+            font-weight: 600;
+            background-color: #343a40;
+            color: white;
+        }
+        .badge-call {
+            background-color: #198754;
+            color: white;
+        }
+        .badge-put {
+            background-color: #dc3545;
+            color: white;
+        }
+        .badge-buy {
+            background-color: #0d6efd;
+            color: white;
+        }
+        .badge-sell {
+            background-color: #fd7e14;
+            color: white;
+        }
+        .badge-unknown {
+            background-color: #6c757d;
+            color: white;
+        }
+        .refresh-indicator {
+            display: inline-block;
+            margin-left: 10px;
+            color: #28a745;
+        }
+        .table-responsive {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        .table-striped > tbody > tr:nth-of-type(odd) {
+            background-color: rgba(0, 0, 0, 0.02);
+        }
+        .table-hover > tbody > tr:hover {
+            background-color: rgba(13, 110, 253, 0.1);
+        }
+        .stock-price {
+            font-weight: bold;
+            color: #0d6efd;
+        }
+        .strike-price {
+            font-weight: bold;
+            color: #198754;
+        }
+        .expiry-date {
+            color: #6c757d;
+        }
+        /* 为不同类型的期权行添加左边框颜色 */
+        tr.call-option {
+            border-left: 4px solid #198754;
+        }
+        tr.put-option {
+            border-left: 4px solid #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">港股期权大单监控</h5>
+                        <div>
+                            <button id="testWeworkBtn" class="btn btn-sm btn-outline-primary me-2">测试企微推送</button>
+                            <button id="forcePushBtn" class="btn btn-sm btn-primary">强制推送大单</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="row mb-4">
+                            <div class="col-md-3">
+                                <div class="card">
+                                    <div class="card-body text-center">
+                                        <h6 class="card-title text-muted">总交易笔数</h6>
+                                        <h3 id="total-count">0</h3>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card">
+                                    <div class="card-body text-center">
+                                        <h6 class="card-title text-muted">总成交金额</h6>
+                                        <h3 id="total-turnover">0</h3>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card">
+                                    <div class="card-body text-center">
+                                        <h6 class="card-title text-muted">平均成交金额</h6>
+                                        <h3 id="avg-turnover">0</h3>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="card">
+                                    <div class="card-body text-center">
+                                        <h6 class="card-title text-muted">涉及股票数</h6>
+                                        <h3 id="unique-stocks">0</h3>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>股票代码</th>
+                                        <th>正股股价</th>
+                                        <th>期权代码</th>
+                                        <th>执行价格</th>
+                                        <th>到期日</th>
+                                        <th>期权类型</th>
+                                        <th>交易方向</th>
+                                        <th>期权价格</th>
+                                        <th>成交量</th>
+                                        <th>成交额</th>
+                                        <th>时间</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="big-options-table">
+                                    <!-- 数据将在这里动态加载 -->
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <div class="mt-3">
+                            <small class="text-muted">
+                                最后更新时间: <span id="last-update-time">--</span>
+                                <span class="refresh-indicator">●</span>
+                                自动刷新中...
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 自动刷新定时器
+        let refreshTimer;
+        
+        // 页面加载完成后执行
+        document.addEventListener('DOMContentLoaded', function() {
+            // 初始加载数据
+            loadBigOptionsSummary(true);
+            
+            // 设置自动刷新 (30秒)
+            startAutoRefresh();
+            
+            // 测试企微推送按钮
+            document.getElementById('testWeworkBtn').addEventListener('click', function() {
+                testWeworkConnection();
+            });
+            
+            // 强制推送大单按钮
+            document.getElementById('forcePushBtn').addEventListener('click', function() {
+                forcePushBigOptions();
+            });
+        });
+        
+        // 启动自动刷新
+        function startAutoRefresh() {
+            // 清除之前的定时器
+            if (refreshTimer) {
+                clearInterval(refreshTimer);
+            }
+            
+            // 设置新的定时器 (30秒)
+            refreshTimer = setInterval(() => {
+                loadBigOptionsSummary();
+                
+                // 更新最后刷新时间
+                const now = new Date();
+                document.getElementById('last-update-time').textContent = now.toLocaleTimeString();
+            }, 30000);
+            
+            // 初始化最后刷新时间
+            const now = new Date();
+            document.getElementById('last-update-time').textContent = now.toLocaleTimeString();
+        }
+        
+        // 格式化数字
+        function formatNumber(num) {
+            return num.toLocaleString('zh-CN');
+        }
+        
+        // 解析期权代码获取执行价格和到期日
+        function parseOptionCode(optionCode) {
+            if (!optionCode || !optionCode.startsWith('HK.')) {
+                return { strikePrice: 'N/A', expiryDate: 'N/A' };
+            }
+            
+            try {
+                // 富途期权代码格式可能有多种:
+                // HK.00700YYMMDDCXXXXX (腾讯)
+                // HK.TCHYYMMDDCXXXXX (腾讯)
+                // HK.09988YYMMDDCXXXXX (阿里)
+                // HK.BABYYMMDDCXXXXX (阿里)
+                const codePart = optionCode.substring(3); // 去掉 HK.
+                
+                // 找到C或P的位置
+                const cPos = codePart.indexOf('C');
+                const pPos = codePart.indexOf('P');
+                
+                if (cPos > 0 || pPos > 0) {
+                    const optionTypePos = cPos > 0 ? cPos : pPos;
+                    
+                    // 执行价格在C/P之后
+                    const strikeStr = codePart.substring(optionTypePos + 1);
+                    let strikePrice = 'N/A';
+                    if (strikeStr && /^\d+$/.test(strikeStr)) {
+                        // 执行价格需要除以1000 (富途API的惯例)
+                        strikePrice = (parseFloat(strikeStr) / 1000).toFixed(2);
+                    }
+                    
+                    // 尝试从C/P位置向前查找6位数字作为日期部分
+                    let expiryDate = 'N/A';
+                    
+                    // 从C/P位置向前查找6位数字
+                    for (let i = optionTypePos - 6; i >= 0; i--) {
+                        if (i + 6 <= optionTypePos) {
+                            const datePart = codePart.substring(i, i + 6);
+                            if (datePart.length === 6 && /^\d+$/.test(datePart)) {
+                                const year = 2000 + parseInt(datePart.substring(0, 2));
+                                const month = parseInt(datePart.substring(2, 4));
+                                const day = parseInt(datePart.substring(4, 6));
+                                
+                                // 验证日期是否有效
+                                const date = new Date(year, month - 1, day);
+                                if (date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day) {
+                                    expiryDate = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    return { strikePrice, expiryDate };
+                }
+            } catch (e) {
+                console.error('解析期权代码失败:', e);
+            }
+            
+            return { strikePrice: 'N/A', expiryDate: 'N/A' };
+        }
+        
+        // 解析期权类型
+        function parseOptionType(optionCode) {
+            if (!optionCode) return { type: 'unknown', badge: 'badge-unknown', text: '未知' };
+            
+            if (optionCode.toUpperCase().includes('C')) {
+                return { type: 'call', badge: 'badge-call', text: 'Call (看涨期权)' };
+            } else if (optionCode.toUpperCase().includes('P')) {
+                return { type: 'put', badge: 'badge-put', text: 'Put (看跌期权)' };
+            } else {
+                return { type: 'unknown', badge: 'badge-unknown', text: '未知' };
+            }
+        }
+        
+        // 解析交易方向
+        function parseTradeDirection(direction) {
+            if (!direction) return { type: 'unknown', badge: 'badge-unknown', text: '未知' };
+            
+            const directionLower = direction.toLowerCase();
+            if (directionLower.includes('买') || directionLower.includes('buy')) {
+                return { type: 'buy', badge: 'badge-buy', text: '买入' };
+            } else if (directionLower.includes('卖') || directionLower.includes('sell')) {
+                return { type: 'sell', badge: 'badge-sell', text: '卖出' };
+            } else {
+                return { type: 'unknown', badge: 'badge-unknown', text: '未知' };
+            }
+        }
+        
+        // 加载大单期权汇总数据
+        function loadBigOptionsSummary(isFirstLoad = false) {
+            const url = isFirstLoad ? '/api/big_options_summary?first_load=true' : '/api/big_options_summary';
+            
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    console.log('获取到的数据:', data);
+                    
+                    // 更新统计信息
+                    document.getElementById('total-count').textContent = data.total_count || 0;
+                    document.getElementById('total-turnover').textContent = formatNumber(data.statistics?.total_turnover || 0);
+                    document.getElementById('avg-turnover').textContent = formatNumber(data.statistics?.avg_turnover || 0);
+                    document.getElementById('unique-stocks').textContent = data.statistics?.unique_stocks || 0;
+                    
+                    // 更新表格数据
+                    const tableBody = document.getElementById('big-options-table');
+                    tableBody.innerHTML = '';
+                    
+                    if (data.big_options && data.big_options.length > 0) {
+                        data.big_options.forEach(option => {
+                            const row = document.createElement('tr');
+                            
+                            // 解析期权类型
+                            const optionType = option.option_type ? 
+                                { type: 'known', badge: option.option_type.includes('Call') ? 'badge-call' : 'badge-put', text: option.option_type } : 
+                                parseOptionType(option.option_code);
+                            
+                            // 为行添加期权类型的CSS类
+                            if (optionType.badge === 'badge-call') {
+                                row.classList.add('call-option');
+                            } else if (optionType.badge === 'badge-put') {
+                                row.classList.add('put-option');
+                            }
+                            
+                            // 解析交易方向
+                            const tradeDirection = option.direction ? 
+                                { type: 'known', badge: option.direction.includes('买') ? 'badge-buy' : 'badge-sell', text: option.direction } : 
+                                parseTradeDirection(option.trade_direction);
+                            
+                            // 解析期权代码获取执行价格和到期日
+                            const parsed = parseOptionCode(option.option_code);
+                            const strikePrice = (option.strike_price && option.strike_price > 0) ? 
+                                parseFloat(option.strike_price).toFixed(2) : parsed.strikePrice;
+                            const expiryDate = option.expiry_date || parsed.expiryDate;
+                            const stockPrice = (option.stock_price && option.stock_price > 0) ? 
+                                parseFloat(option.stock_price).toFixed(2) : 'N/A';
+                            
+                            // 格式化时间
+                            const timestamp = option.timestamp ? 
+                                new Date(option.timestamp).toLocaleString('zh-CN', { 
+                                    hour12: false,
+                                    year: 'numeric',
+                                    month: '2-digit',
+                                    day: '2-digit',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    second: '2-digit'
+                                }) : '';
+                            
+                            row.innerHTML = `
+                                <td>${option.stock_code || ''}</td>
+                                <td><span class="stock-price">${stockPrice}</span></td>
+                                <td>${option.option_code || ''}</td>
+                                <td><span class="strike-price">${strikePrice}</span></td>
+                                <td><span class="expiry-date">${expiryDate}</span></td>
+                                <td><span class="badge ${optionType.badge}">${optionType.text}</span></td>
+                                <td><span class="badge ${tradeDirection.badge}">${tradeDirection.text}</span></td>
+                                <td>${option.price ? option.price.toFixed(2) : ''}</td>
+                                <td>${option.volume || ''}</td>
+                                <td>${option.turnover ? formatNumber(option.turnover) : ''}</td>
+                                <td>${timestamp}</td>
+                            `;
+                            
+                            tableBody.appendChild(row);
+                        });
+                    } else {
+                        const row = document.createElement('tr');
+                        row.innerHTML = '<td colspan="11" class="text-center text-muted">暂无大单期权数据</td>';
+                        tableBody.appendChild(row);
+                    }
+                })
+                .catch(error => {
+                    console.error('获取数据失败:', error);
+                });
+        }
+        
+        // 测试企微连接
+        function testWeworkConnection() {
+            fetch('/api/test_wework')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('企微推送测试成功！');
+                    } else {
+                        alert('企微推送测试失败: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('测试企微连接失败:', error);
+                    alert('测试企微连接失败');
+                });
+        }
+        
+        // 强制推送大单
+        function forcePushBigOptions() {
+            fetch('/api/force_push')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        alert('强制推送成功！' + data.message);
+                    } else {
+                        alert('强制推送失败: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('强制推送失败:', error);
+                    alert('强制推送失败');
+                });
+        }
+    </script>
+</body>
+</html>

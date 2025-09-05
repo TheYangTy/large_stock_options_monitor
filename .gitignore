@@ -1,0 +1,11 @@
+.DS_Store
+*.pyc
+*.log
+*.log.1
+*.log.2
+config.py
+data/current_big_option.json
+data/hk_earnings_calendar.csv
+data/hk_earnings_calendar.json
+data/pushed_options.json
+templates/dashboard_backup.html

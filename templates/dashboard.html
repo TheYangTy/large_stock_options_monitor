@@ -94,6 +94,23 @@
                         </div>
                     </div>
                     <div class="card-body">
+                        <!-- 筛选区：股票代码 / 股票名称 -->
+                        <div id="filters" class="mb-3" style="padding:10px; border:1px solid #eee; border-radius:6px;">
+                            <div class="row g-3">
+                                <div class="col-12 col-md-6">
+                                    <div class="fw-semibold mb-2">股票代码</div>
+                                    <div id="filter-codes" class="d-flex flex-wrap gap-3"></div>
+                                </div>
+                                <div class="col-12 col-md-6">
+                                    <div class="fw-semibold mb-2">股票名称</div>
+                                    <div id="filter-names" class="d-flex flex-wrap gap-3"></div>
+                                </div>
+                            </div>
+                            <div class="mt-2 d-flex gap-2 flex-wrap">
+                                <button id="btn-apply-filters" class="btn btn-primary btn-sm">应用筛选</button>
+                                <button id="btn-clear-filters" class="btn btn-secondary btn-sm">清除筛选</button>
+                            </div>
+                        </div>
                         <div class="row mb-4">
                             <div class="col-md-3">
                                 <div class="card">
@@ -170,6 +187,95 @@
     <script>
         // 自动刷新定时器
         let refreshTimer;
+
+        // 筛选器状态
+        let selectedCodes = new Set();
+        let selectedNames = new Set();
+
+        // 应用筛选：根据已选的代码/名称过滤
+        function applyFilters(arr) {
+            try {
+                let data = Array.isArray(arr) ? arr : [];
+                if (selectedCodes.size > 0) {
+                    data = data.filter(o => o && selectedCodes.has(String(o.stock_code)));
+                }
+                if (selectedNames.size > 0) {
+                    data = data.filter(o => o && selectedNames.has(String(o.stock_name)));
+                }
+                return data;
+            } catch (e) {
+                console.error('应用筛选失败:', e);
+                return Array.isArray(arr) ? arr : [];
+            }
+        }
+
+        // 构建筛选复选框（去重后渲染；名称最多展示20个防止过长）
+        function buildFilters(bigOptions) {
+            try {
+                const codes = new Set();
+                const names = new Set();
+                (bigOptions || []).forEach(o => {
+                    if (o && typeof o === 'object') {
+                        if (o.stock_code) codes.add(String(o.stock_code));
+                        if (o.stock_name) names.add(String(o.stock_name));
+                    }
+                });
+
+                const codesArr = Array.from(codes).sort();
+                const namesArr = Array.from(names).sort();
+
+                const codeBox = document.getElementById('filter-codes');
+                const nameBox = document.getElementById('filter-names');
+                if (!codeBox || !nameBox) return;
+
+                codeBox.innerHTML = codesArr.map(code => {
+                    const id = 'code_' + code.replace(/[^a-zA-Z0-9_]/g, '_');
+                    const checked = selectedCodes.has(code) ? 'checked' : '';
+                    return `<label for="${id}" class="form-check-label d-inline-flex align-items-center gap-1">
+                        <input class="form-check-input" type="checkbox" id="${id}" value="${code}" ${checked}/> ${code}
+                    </label>`;
+                }).join('');
+
+                const maxNames = 20;
+                const showNames = namesArr.slice(0, maxNames);
+                nameBox.innerHTML = showNames.map(name => {
+                    const id = 'name_' + name.replace(/[^a-zA-Z0-9_]/g, '_');
+                    const checked = selectedNames.has(name) ? 'checked' : '';
+                    return `<label for="${id}" class="form-check-label d-inline-flex align-items-center gap-1">
+                        <input class="form-check-input" type="checkbox" id="${id}" value="${name}" ${checked}/> ${name}
+                    </label>`;
+                }).join('');
+
+                const btnApply = document.getElementById('btn-apply-filters');
+                const btnClear = document.getElementById('btn-clear-filters');
+
+                if (btnApply) {
+                    btnApply.onclick = () => {
+                        selectedCodes = new Set(Array.from(codeBox.querySelectorAll('input[type="checkbox"]:checked')).map(i => i.value));
+                        selectedNames = new Set(Array.from(nameBox.querySelectorAll('input[type="checkbox"]:checked')).map(i => i.value));
+                        // 重新加载一次以应用筛选（无需再次请求，可直接用当前数据渲染）
+                        applyFiltersAndReRender();
+                    };
+                }
+                if (btnClear) {
+                    btnClear.onclick = () => {
+                        selectedCodes.clear();
+                        selectedNames.clear();
+                        codeBox.querySelectorAll('input[type="checkbox"]').forEach(i => i.checked = false);
+                        nameBox.querySelectorAll('input[type="checkbox"]').forEach(i => i.checked = false);
+                        applyFiltersAndReRender();
+                    };
+                }
+            } catch (e) {
+                console.error('构建筛选器失败:', e);
+            }
+        }
+
+        // 使用当前页面数据重新渲染（从表格读取原始数据不方便，这里依赖最近一次接口返回）
+        // 简化处理：再次调用加载函数，但不传 first_load；后端已支持不带筛选返回完整数据
+        function applyFiltersAndReRender() {
+            loadBigOptionsSummary(false);
+        }
         
         // 页面加载完成后执行
         document.addEventListener('DOMContentLoaded', function() {
@@ -322,8 +428,11 @@
                     const tableBody = document.getElementById('big-options-table');
                     tableBody.innerHTML = '';
                     
-                    if (data.big_options && data.big_options.length > 0) {
-                        data.big_options.forEach(option => {
+                    const allData = data.big_options || [];
+                    buildFilters(allData);
+                    const displayData = applyFilters(allData);
+                    if (displayData && displayData.length > 0) {
+                        displayData.forEach(option => {
                             const row = document.createElement('tr');
                             
                             // 解析期权类型

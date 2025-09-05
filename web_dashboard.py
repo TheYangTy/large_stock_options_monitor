@@ -321,6 +321,25 @@ def get_big_options_summary():
         # 检查数据是否有变化
         current_data_hash = hash(str(summary))
         data_changed = last_data_hash is not None and current_data_hash != last_data_hash
+
+        # 应用筛选器：按股票代码与股票名称（包含匹配，不区分大小写）
+        code_filter = request.args.get('stock_code', '').strip()
+        name_filter = request.args.get('stock_name', '').strip()
+        if (code_filter or name_filter) and isinstance(big_options, list):
+            cf = code_filter.lower()
+            nf = name_filter.lower()
+            def _match(opt):
+                try:
+                    code = str(opt.get('stock_code', '')).lower()
+                    name = str(opt.get('stock_name', '')).lower()
+                    okc = True if not cf else (cf in code)
+                    okn = True if not nf else (nf in name)
+                    return okc and okn
+                except Exception:
+                    return False
+            before = len(big_options)
+            big_options = [o for o in big_options if isinstance(o, dict) and _match(o)]
+            logger.info(f"筛选: code='{code_filter}', name='{name_filter}' => {len(big_options)}/{before}")
         
         # 强制发送大单数据到企微
         # 推送逻辑已迁移到 option_monitor.py，此处禁用
@@ -388,7 +407,7 @@ def get_big_options_summary():
         
         # 确保数据格式正确
         result = {
-            'total_count': summary.get('total_count', 0),
+            'total_count': len(big_options) if isinstance(big_options, list) else summary.get('total_count', 0),
             'update_time': summary.get('update_time'),
             'lookback_days': summary.get('lookback_days', 2),
             'statistics': summary.get('statistics', {}),

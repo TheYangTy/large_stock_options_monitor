@@ -263,6 +263,29 @@ def get_big_options_summary():
                         nm = stock_name_map.get(code)
                         if nm:
                             opt['stock_name'] = nm
+
+        # 读取 stock_prices.json 中的成交额，补充到 big_options 的 stock_turnover 字段
+        try:
+            stock_turnover_map = {}
+            sp_path = os.path.join('data', 'stock_prices.json')
+            if os.path.exists(sp_path):
+                with open(sp_path, 'r', encoding='utf-8') as f:
+                    sp = json.load(f)
+                prices = sp.get('prices') if isinstance(sp, dict) else None
+                if isinstance(prices, dict):
+                    for code, info in prices.items():
+                        if isinstance(info, dict) and ('turnover' in info):
+                            stock_turnover_map[code] = info.get('turnover')
+            if isinstance(big_options, list) and stock_turnover_map:
+                for opt in big_options:
+                    if isinstance(opt, dict):
+                        code = opt.get('stock_code')
+                        if code and ('stock_turnover' not in opt):
+                            t = stock_turnover_map.get(code)
+                            if t is not None:
+                                opt['stock_turnover'] = t
+        except Exception as _e:
+            logger.warning(f"读取stock_prices成交额失败: {_e}")
         
         logger.debug(f"从缓存加载汇总数据: {summary is not None}")
         if summary:

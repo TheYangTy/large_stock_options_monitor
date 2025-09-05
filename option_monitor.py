@@ -997,17 +997,33 @@ class StockQuoteHandler(ft.StockQuoteHandlerBase):
         if data.empty:
             return ret_code, data
         
-        # 更新股价缓存
+        # 更新股价缓存（含成交额/名称）
         for _, row in data.iterrows():
             stock_code = row['code']
             last_price = row['last_price']
+            turnover = row.get('turnover', None)
+            stock_name = row.get('name', '') if isinstance(row, dict) or hasattr(row, 'get') else ''
             
-            # 更新缓存
-            self.monitor.stock_price_cache[stock_code] = last_price
+            # 取已有缓存，统一存储为dict结构
+            prev = self.monitor.stock_price_cache.get(stock_code, {})
+            if not isinstance(prev, dict):
+                prev = {}
+            info = dict(prev)  # 复制避免原地修改副作用
+            info['price'] = last_price
+            if turnover is not None:
+                try:
+                    info['turnover'] = float(turnover)
+                except Exception:
+                    pass
+            if stock_name and not info.get('name'):
+                info['name'] = stock_name
+            
+            # 更新缓存与时间
+            self.monitor.stock_price_cache[stock_code] = info
             self.monitor.price_update_time[stock_code] = datetime.now()
             
             # 记录股价变动
-            self.logger.debug(f"股价更新: {stock_code} = {last_price}")
+            self.logger.debug(f"股价更新: {stock_code} 价格={last_price}, 成交额={info.get('turnover', '')}")
         
         return ret_code, data
 

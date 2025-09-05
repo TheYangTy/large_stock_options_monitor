@@ -153,6 +153,7 @@
                                         <th>股票代码</th>
                                         <th>股票名称</th>
                                         <th>正股股价</th>
+                                        <th>正股成交额(万)</th>
                                         <th>期权代码</th>
                                         <th>执行价格</th>
                                         <th>到期日</th>
@@ -457,6 +458,8 @@
                             const expiryDate = option.expiry_date || parsed.expiryDate;
                             const stockPrice = (option.stock_price && option.stock_price > 0) ? 
                                 parseFloat(option.stock_price).toFixed(2) : 'N/A';
+                            const stockTurnover = (typeof option.stock_turnover === 'number') ? 
+                                (option.stock_turnover / 10000).toFixed(1) : '';
                             
                             // 格式化时间
                             const timestamp = option.timestamp ? 
@@ -474,6 +477,7 @@
                                 <td>${option.stock_code || ''}</td>
                                 <td>${option.stock_name || ''}</td>
                                 <td><span class="stock-price">${stockPrice}</span></td>
+                                <td>${stockTurnover}</td>
                                 <td>${option.option_code || ''}</td>
                                 <td><span class="strike-price">${strikePrice}</span></td>
                                 <td><span class="expiry-date">${expiryDate}</span></td>

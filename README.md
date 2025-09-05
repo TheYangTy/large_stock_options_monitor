@@ -141,3 +141,7 @@ pip install -r requirements.txt
 - 可根据需要调整筛选条件
 - 企微机器人需要先申请并配置Webhook地址
 - 系统默认每5分钟刷新一次数据，可在配置中调整
+
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=altenli/large_stock_options_monitor&type=Date)](https://star-history.com/#altenli/large_stock_options_monitor&Date)

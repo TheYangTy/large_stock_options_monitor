@@ -19,6 +19,11 @@
 ## 📋 安装依赖
 
 ```bash
+# 用conda创建虚拟环境
+conda create -n stock_options_env python=3.11
+# 激活conda
+conda activate stock_options_env
+# 安装依赖
 pip install -r requirements.txt
 ```
 
@@ -84,6 +89,20 @@ pip install -r requirements.txt
    ```bash
    python option_monitor.py --once
    ```
+
+## 📸 运行时截图
+
+### 控制台输出
+![启动option_monitor](screenshots/console_output2.png)
+
+![启动Web界面](screenshots/console_output.png)
+
+### Web界面
+![Web界面](screenshots/web_dashboard.png)
+
+### 企微机器人通知
+![企微机器人通知](screenshots/wework_notification.png)
+
 
 ## 🌐 Web界面功能
 

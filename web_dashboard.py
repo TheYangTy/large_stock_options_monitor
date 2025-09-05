@@ -197,7 +197,7 @@ def after_request(response):
 
 @app.route('/api/big_options_summary')
 def get_big_options_summary():
-    """获取大单期权汇总API"""
+    """获取大单期权汇总API - 直接使用option_monitor.py生成的缓存数据"""
     global last_data_hash
     
     try:
@@ -205,125 +205,42 @@ def get_big_options_summary():
         is_first_load = request.args.get('first_load', 'false').lower() == 'true'
         logger.info(f"API调用: big_options_summary, first_load={is_first_load}")
         
-        # 强制重新加载数据
+        # 直接从缓存文件加载数据，不再调用Futu API
         summary = big_options_processor.load_current_summary()
         
-        logger.debug(f"加载汇总数据: {summary is not None}")
+        logger.debug(f"从缓存加载汇总数据: {summary is not None}")
         if summary:
             logger.debug(f"汇总数据包含 {summary.get('total_count', 0)} 笔交易")
         
         if not summary:
-            # 如果没有数据，尝试生成新的汇总
-            logger.debug("没有找到汇总数据，尝试生成新的汇总...")
-            try:
-                from datetime import datetime, timedelta
-                end_date = datetime.now()
-                start_date = end_date - timedelta(days=2)
-                
-                # 尝试生成新的汇总
-                new_summary = big_options_processor.process_big_options_summary(
-                    start_date=start_date,
-                    end_date=end_date
-                )
-                
-                if new_summary and new_summary.get('total_count', 0) > 0:
-                    summary = new_summary
-                    logger.debug(f"生成新汇总成功: {summary.get('total_count', 0)} 笔交易")
-                else:
-                    logger.debug("生成新汇总失败或无数据")
-                    
-            except Exception as gen_error:
-                logger.error(f"生成汇总时出错: {gen_error}")
-        
-        if not summary:
+            logger.warning("未找到缓存的汇总数据，请先运行option_monitor.py生成数据")
             return jsonify({
                 'total_count': 0,
                 'update_time': None,
                 'lookback_days': 2,
                 'statistics': {},
                 'big_options': [],
-                'debug_info': '无汇总数据'
+                'debug_info': '未找到缓存数据，请先运行option_monitor.py'
             })
         
         # 增强数据：添加期权类型和交易方向
         big_options = summary.get('big_options', [])
         
-        # 先获取所有股票的股价
-        stock_prices = {}
-        try:
-            # 收集所有需要查询的股票代码
-            stock_codes = list(set([option.get('stock_code', '') for option in big_options if option.get('stock_code')]))
-            
-            # 检查是否是首次加载，如果是则强制刷新股价
-            force_refresh = is_first_load
-            
-            if stock_codes:
-                logger.info(f"准备获取 {len(stock_codes)} 只股票的价格...")
-                
-                # 批量获取所有股票价格
-                for stock_code in stock_codes:
-                    price = get_stock_price(stock_code, force_refresh=force_refresh)
-                    if price > 0:
-                        stock_prices[stock_code] = price
-                
-                logger.info(f"成功获取 {len(stock_prices)} 只股票的价格")
-                
-                # 如果有些股票没有获取到价格，尝试从期权对象中获取
-                missing_stocks = [code for code in stock_codes if code not in stock_prices]
-                if missing_stocks:
-                    logger.warning(f"有 {len(missing_stocks)} 只股票未获取到价格，尝试从期权对象中获取")
-                    for option in big_options:
-                        stock_code = option.get('stock_code', '')
-                        if stock_code in missing_stocks and 'stock_price' in option and option['stock_price'] > 0:
-                            stock_prices[stock_code] = option['stock_price']
-                            # 更新缓存
-                            stock_price_cache[stock_code] = option['stock_price']
-                            stock_price_cache_time[stock_code] = datetime.now()
-            else:
-                logger.info("没有需要获取价格的股票")
-        except Exception as e:
-            logger.error(f"获取股价处理异常: {e}")
-            logger.error(traceback.format_exc())
-        
-        # 处理每个期权
+        # 处理每个期权，确保所有必要字段都存在
         for option in big_options:
-            # 获取股价
-            stock_code = option.get('stock_code', '')
-            option['stock_price'] = stock_prices.get(stock_code, 0)
-            
-            # 解析期权代码获取执行价格和到期日
-            option_code = option.get('option_code', '')
-            
-            # 解析执行价格和到期日
-            import re
-            try:
-                match = re.match(r'HK\.([A-Z]+)(\d{6})([CP])(\d+)', option_code)
-                if match:
-                    stock_symbol, date_str, option_type_char, strike_str = match.groups()
-                    
-                    # 解析执行价格 (除以1000)
-                    option['strike_price'] = int(strike_str) / 1000
-                    
-                    # 解析到期日 (YYMMDD -> YYYY-MM-DD)
-                    year = 2000 + int(date_str[:2])
-                    month = date_str[2:4]
-                    day = date_str[4:6]
-                    option['expiry_date'] = f"{year}-{month}-{day}"
-                    
-                    # 期权类型
-                    option['option_type'] = "Call (看涨期权)" if option_type_char == 'C' else "Put (看跌期权)"
+            # 确保期权类型字段存在
+            if 'option_type' not in option or not option['option_type']:
+                option_code = option.get('option_code', '')
+                if 'C' in option_code.upper():
+                    option['option_type'] = "Call (看涨期权)"
+                elif 'P' in option_code.upper():
+                    option['option_type'] = "Put (看跌期权)"
                 else:
-                    option['strike_price'] = 0
-                    option['expiry_date'] = ''
                     option['option_type'] = '未知'
-            except:
-                option['strike_price'] = 0
-                option['expiry_date'] = ''
-                option['option_type'] = '未知'
             
-            # 解析交易方向 (买入/卖出)
-            if 'direction' not in option or option['direction'] == '未知':
-                # 首先使用方向分析器推断交易方向
+            # 确保交易方向字段存在
+            if 'direction' not in option or not option['direction'] or option['direction'] == '未知':
+                # 使用方向分析器推断交易方向
                 option['direction'] = direction_analyzer.analyze_direction(option)
                 
                 # 如果方向仍然是未知，根据期权类型和成交量/价格变化推断
@@ -333,20 +250,17 @@ def get_big_options_summary():
                     
                     # 根据期权类型和价格变化推断方向
                     if 'Call' in option_type or '看涨' in option_type:
-                        # 看涨期权价格上涨通常是买入看涨，价格下跌通常是卖出看涨
                         option['direction'] = '买入看涨' if change_rate >= 0 else '卖出看涨'
                     elif 'Put' in option_type or '看跌' in option_type:
-                        # 看跌期权价格上涨通常是买入看跌，价格下跌通常是卖出看跌
                         option['direction'] = '买入看跌' if change_rate >= 0 else '卖出看跌'
                     else:
-                        # 如果期权类型也未知，根据期权代码判断
                         option_code = option.get('option_code', '')
                         if 'C' in option_code.upper():
-                            option['direction'] = '买入看涨'  # 默认为买入看涨
+                            option['direction'] = '买入看涨'
                         elif 'P' in option_code.upper():
-                            option['direction'] = '买入看跌'  # 默认为买入看跌
+                            option['direction'] = '买入看跌'
                         else:
-                            option['direction'] = '买入'  # 最后的默认值
+                            option['direction'] = '买入'
         
         # 检查数据是否有变化
         current_data_hash = hash(str(summary))
@@ -391,13 +305,15 @@ def get_big_options_summary():
                         # 添加最多5条新增大单明细
                         for i, option in enumerate(new_options[:5]):
                             stock_code = option.get('stock_code', 'Unknown')
+                            stock_name = option.get('stock_name', '')
+                            stock_display = f"{stock_name}({stock_code})" if stock_name else stock_code
                             option_code = option.get('option_code', 'Unknown')
                             option_type = option.get('option_type', '未知')
                             direction = option.get('direction', '未知')
                             volume = option.get('volume', 0)
                             turnover = option.get('turnover', 0)
                             
-                            message += f"\n{i+1}. {stock_code} {option_code} {option_type} {direction} {volume}手 {turnover:,.0f}港币"
+                            message += f"\n{i+1}. {stock_display} {option_code} {option_type} {direction} {volume}手 {turnover:,.0f}港币"
                         
                         if new_count > 5:
                             message += f"\n... 还有 {new_count - 5} 笔新增大单 (详见网页)"
@@ -426,7 +342,7 @@ def get_big_options_summary():
             'statistics': summary.get('statistics', {}),
             'big_options': big_options,
             'filter_conditions': summary.get('filter_conditions', {}),
-            'debug_info': f"成功加载 {summary.get('total_count', 0)} 笔交易"
+            'debug_info': f"成功从缓存加载 {summary.get('total_count', 0)} 笔交易"
         }
         
         return jsonify(result)
@@ -457,98 +373,53 @@ def get_big_options_summary():
 
 @app.route('/api/refresh_big_options')
 def refresh_big_options():
-    """强制刷新大单数据API"""
+    """强制刷新大单数据API - 基于option_monitor.py生成的缓存数据"""
     try:
-        from datetime import datetime, timedelta
-        import futu as ft
+        from datetime import datetime
         
-        logger.info("开始强制刷新大单数据...")
+        logger.info("开始刷新大单数据（从缓存文件）...")
         
-        # 连接富途OpenD
+        # 直接从缓存文件加载数据，不再调用Futu API
+        summary = big_options_processor.load_current_summary()
+        
+        if not summary:
+            logger.warning("未找到缓存的汇总数据，请先运行option_monitor.py生成数据")
+            return jsonify({
+                'success': False, 
+                'message': '未找到缓存数据，请先运行option_monitor.py生成数据',
+                'summary': None
+            })
+        
+        # 更新时间戳，表示已刷新
+        summary['update_time'] = datetime.now().isoformat()
+        
+        # 保存更新后的数据回文件
         try:
-            # 移除timeout参数，富途API不支持
-            quote_ctx = ft.OpenQuoteContext(host='127.0.0.1', port=11111)
-            logger.info("成功连接到富途OpenD")
-            
-            # 从配置中获取监控的股票列表
-            from config import MONITOR_STOCKS
-            
-            # 调用big_options_processor的方法获取最新的期权大单数据
-            logger.info(f"开始获取 {len(MONITOR_STOCKS)} 只股票的期权大单数据...")
-            big_options = big_options_processor.get_recent_big_options(quote_ctx, MONITOR_STOCKS)
-            logger.info(f"成功获取 {len(big_options)} 笔期权大单")
-            
-            # 更新股价缓存
-            try:
-                # 收集所有需要查询的股票代码
-                stock_codes = list(set([option.get('stock_code', '') for option in big_options if option.get('stock_code')]))
-                
-                if stock_codes:
-                    logger.info(f"刷新 {len(stock_codes)} 只股票的价格缓存...")
-                    ret, data = quote_ctx.get_market_snapshot(stock_codes)
-                    
-                    if ret == ft.RET_OK and not data.empty:
-                        current_time = datetime.now()
-                        # 更新全局股价缓存
-                        for _, row in data.iterrows():
-                            code = row['code']
-                            price = float(row['last_price'])
-                            stock_price_cache[code] = price
-                            stock_price_cache_time[code] = current_time
-                        logger.info(f"成功更新 {len(data)} 只股票的价格缓存")
-                        
-                        # 同时更新期权对象中的股价
-                        for option in big_options:
-                            stock_code = option.get('stock_code', '')
-                            if stock_code in stock_price_cache:
-                                option['stock_price'] = stock_price_cache[stock_code]
-            except Exception as cache_err:
-                logger.error(f"更新股价缓存失败: {cache_err}")
-            
-            # 保存数据到JSON文件
-            big_options_processor.save_big_options_summary(big_options)
-            logger.info("期权大单数据已保存到JSON文件")
-            
-            # 关闭连接
-            quote_ctx.close()
-            
-            # 加载保存后的汇总数据
-            summary = big_options_processor.load_current_summary()
-            
-        except Exception as ft_error:
-            logger.error(f"连接富途OpenD或获取数据失败: {ft_error}")
-            logger.error(traceback.format_exc())
-            
-            # 如果实时获取失败，尝试使用原来的方法
-            logger.info("尝试使用备用方法刷新数据...")
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=2)
-            
-            # 使用原来的方法处理数据
-            summary = big_options_processor.process_big_options_summary(
-                start_date=start_date,
-                end_date=end_date
-            )
+            import json
+            with open(big_options_processor.json_file, 'w', encoding='utf-8') as f:
+                json.dump(summary, f, ensure_ascii=False, indent=2)
+            logger.info("已更新缓存文件的时间戳")
+        except Exception as save_err:
+            logger.error(f"更新缓存文件时间戳失败: {save_err}")
         
-        if summary and summary.get('total_count', 0) > 0:
-            logger.debug(f"强制刷新成功: {summary.get('total_count', 0)} 笔交易")
+        if summary.get('total_count', 0) > 0:
+            logger.info(f"刷新成功: {summary.get('total_count', 0)} 笔交易")
             return jsonify({
                 'success': True, 
-                'message': f'刷新成功，发现 {summary.get("total_count", 0)} 笔大单',
+                'message': f'刷新成功，从缓存加载了 {summary.get("total_count", 0)} 笔大单',
                 'summary': summary
             })
         else:
-            logger.debug("强制刷新完成，但无大单数据")
+            logger.info("刷新完成，但缓存中无大单数据")
             return jsonify({
                 'success': True, 
-                'message': '刷新完成，暂无大单数据',
+                'message': '刷新完成，缓存中暂无大单数据',
                 'summary': None
             })
             
     except Exception as e:
-        logger.error(f"强制刷新失败: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"刷新失败: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({
             'success': False, 
             'message': f'刷新失败: {e}'

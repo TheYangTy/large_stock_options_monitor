@@ -781,14 +781,33 @@ class BigOptionsProcessor:
             if big_options:
                 summary['statistics'] = self._calculate_statistics(big_options)
             
+            # 定义JSON序列化器，处理NumPy类型
+            def json_serializer(obj):
+                """处理NumPy类型的JSON序列化器"""
+                import numpy as np
+                if isinstance(obj, np.integer):
+                    return int(obj)
+                elif isinstance(obj, np.floating):
+                    return float(obj)
+                elif isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                elif isinstance(obj, pd.Series):
+                    return obj.tolist()
+                elif isinstance(obj, pd.DataFrame):
+                    return obj.to_dict()
+                else:
+                    return str(obj)
+            
             # 保存到JSON文件
             with open(self.json_file, 'w', encoding='utf-8') as f:
-                json.dump(summary, f, ensure_ascii=False, indent=2)
+                json.dump(summary, f, ensure_ascii=False, indent=2, default=json_serializer)
             
             self.logger.info(f"大单期权汇总已保存: {len(big_options)}笔交易")
             
         except Exception as e:
             self.logger.error(f"保存大单期权汇总失败: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
     
     def _parse_strike_from_code(self, option_code: str) -> float:
         """从期权代码解析执行价格（使用末尾的 C/P 标识）"""
@@ -859,6 +878,7 @@ class BigOptionsProcessor:
         # 转换为DataFrame便于统计
         df = pd.DataFrame(big_options)
         
+        # 确保使用Python原生类型，而不是NumPy类型
         stats = {
             'total_volume': int(df['volume'].sum()),
             'total_turnover': float(df['turnover'].sum()),
@@ -875,10 +895,10 @@ class BigOptionsProcessor:
             'option_code': 'count'
         })
         
-        # 转换为字典格式
+        # 转换为字典格式，确保使用Python原生类型
         stock_dict = {}
         for stock in stock_stats.index:
-            stock_dict[stock] = {
+            stock_dict[str(stock)] = {  # 确保键是字符串
                 'volume': int(stock_stats.loc[stock, 'volume']),
                 'turnover': float(stock_stats.loc[stock, 'turnover']),
                 'trade_count': int(stock_stats.loc[stock, 'option_code'])

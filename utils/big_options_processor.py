@@ -76,7 +76,7 @@ class BigOptionsProcessor:
                                 self.logger.warning(f"连续错误超过3次，跳过{stock_code}剩余期权")
                                 break
                                 
-                            option_big_trades = self._get_option_big_trades(quote_ctx, option_code, stock_code)
+                            option_big_trades = self._get_option_big_trades(quote_ctx, option_code, stock_code, option_monitor)
                             if option_big_trades:
                                 stock_big_options.extend(option_big_trades)
                                 self.logger.info(f"期权 {j+1}/{len(selected_options)}: {option_code} 发现 {len(option_big_trades)} 笔大单")
@@ -376,16 +376,16 @@ class BigOptionsProcessor:
                 
             return {'price': 0.0, 'name': ''}
     
-    def _get_stock_big_options(self, quote_ctx, stock_code: str) -> List[Dict[str, Any]]:
+    def _get_stock_big_options(self, quote_ctx, stock_code: str, option_monitor=None) -> List[Dict[str, Any]]:
         """获取单个股票的大单期权"""
         big_options = []
         
         try:
-            # 获取期权链
-            option_codes = self._get_option_codes(quote_ctx, stock_code)
+            # 获取期权链 - 传递option_monitor参数
+            option_codes = self._get_option_codes(quote_ctx, stock_code, option_monitor)
             self.logger.info(f"获取{stock_code}期权: {len(option_codes)}个")
             for option_code in option_codes:
-                option_big_trades = self._get_option_big_trades(quote_ctx, option_code, stock_code)
+                option_big_trades = self._get_option_big_trades(quote_ctx, option_code, stock_code, option_monitor)
                 big_options.extend(option_big_trades)
                 
         except Exception as e:
@@ -393,18 +393,26 @@ class BigOptionsProcessor:
         
         return big_options
     
-    def _get_option_codes(self, quote_ctx, stock_code: str) -> List[str]:
+    def _get_option_codes(self, quote_ctx, stock_code: str, option_monitor=None) -> List[str]:
         """获取期权代码列表"""
         try:
             import futu as ft
             
             option_codes = []
             
-            # 首先获取当前股价
+            # 首先获取当前股价 - 优先使用option_monitor中的股价缓存
             try:
-                ret_snap, snap_data = quote_ctx.get_market_snapshot([stock_code])
-                if ret_snap != ft.RET_OK or snap_data.empty:
-                    self.logger.warning(f"获取{stock_code}市场快照失败，尝试使用默认价格")
+                current_price = None
+                
+                # 如果提供了option_monitor，优先使用其股价缓存
+                if option_monitor is not None:
+                    stock_info = option_monitor.get_stock_price(stock_code)
+                    if stock_info and 'price' in stock_info and stock_info['price'] > 0:
+                        current_price = stock_info['price']
+                        self.logger.info(f"{stock_code}当前股价(来自缓存): {current_price}")
+                
+                # 如果没有从缓存获取到有效股价，则使用默认价格
+                if current_price is None or current_price <= 0:
                     # 使用默认价格作为回退
                     if stock_code == 'HK.00700':  # 腾讯
                         current_price = 600.0
@@ -422,10 +430,7 @@ class BigOptionsProcessor:
                         current_price = 300.0
                     else:
                         current_price = 100.0  # 默认价格
-                else:
-                    current_price = snap_data.iloc[0]['last_price']
-                
-                self.logger.info(f"{stock_code}当前股价: {current_price}")
+                    self.logger.info(f"{stock_code}当前股价(使用默认价格): {current_price}")
                 
                 # 基于股价设定期权执行价格过滤范围
                 price_range = OPTION_FILTER.get('price_range', 0.2)  # 配置中是20%
@@ -659,13 +664,35 @@ class BigOptionsProcessor:
                     
                     self.logger.info(f"期权详情 {option_code}: 执行价{strike_price:.2f} vs 股价{current_stock_price:.2f} ({stock_name}), 差价{price_diff:+.2f}({price_diff_pct:+.1f}%), 类型:{option_type}")
                 else:
-                    # 如果没有option_monitor或其中没有股价缓存，则使用API获取
-                    try:
-                        ret_stock, stock_snap = quote_ctx.get_market_snapshot([stock_code])
-                        if ret_stock == ft.RET_OK and not stock_snap.empty:
-                            row = stock_snap.iloc[0]
-                            current_stock_price = row['last_price']
-                            stock_name = row.get('name', '') or row.get('stock_name', '')  # 获取股票名称
+                    # 如果没有option_monitor或其中没有股价缓存，则使用默认价格
+                    # 不再直接请求市场快照，避免API调用过多
+                    self.logger.debug(f"未找到{stock_code}的股价缓存，使用默认价格")
+                    
+                    # 使用默认价格
+                    if stock_code == 'HK.00700':  # 腾讯
+                        current_stock_price = 600.0
+                        stock_name = "腾讯控股"
+                    elif stock_code == 'HK.09988':  # 阿里巴巴
+                        current_stock_price = 130.0
+                        stock_name = "阿里巴巴-SW"
+                    elif stock_code == 'HK.03690':  # 美团
+                        current_stock_price = 120.0
+                        stock_name = "美团-W"
+                    elif stock_code == 'HK.01810':  # 小米
+                        current_stock_price = 15.0
+                        stock_name = "小米集团-W"
+                    elif stock_code == 'HK.09618':  # 京东
+                        current_stock_price = 120.0
+                        stock_name = "京东集团-SW"
+                    elif stock_code == 'HK.02318':  # 中国平安
+                        current_stock_price = 40.0
+                        stock_name = "中国平安"
+                    elif stock_code == 'HK.00388':  # 港交所
+                        current_stock_price = 300.0
+                        stock_name = "香港交易所"
+                    else:
+                        current_stock_price = 100.0
+                        stock_name = stock_code
                             price_diff = strike_price - current_stock_price if current_stock_price else 0
                             price_diff_pct = (price_diff / current_stock_price) * 100 if current_stock_price else 0
                             option_info['stock_price'] = current_stock_price

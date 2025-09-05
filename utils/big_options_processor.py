@@ -25,16 +25,16 @@ class BigOptionsProcessor:
         self.price_cache_time = {}   # 缓存时间
         self.last_option_volumes = {}  # 缓存上一次的期权交易量
     
-    def get_recent_big_options(self, quote_ctx, stock_codes: List[str]) -> List[Dict[str, Any]]:
-        """获取最近2天的大单期权"""
+    def get_recent_big_options(self, quote_ctx, stock_codes: List[str], option_monitor=None) -> List[Dict[str, Any]]:
+        """获取最近2天的大单期权 - 可选使用option_monitor中的股价缓存"""
         all_big_options = []
         processed_stocks = set()  # 用于跟踪已处理的股票
         failed_stocks = set()     # 用于跟踪获取失败的股票
         
         self.logger.info(f"开始获取 {len(stock_codes)} 只股票的大单期权数据...")
         
-        # 预先获取所有股票的价格，减少API调用
-        stock_prices = self._batch_get_stock_prices(quote_ctx, stock_codes)
+        # 预先获取所有股票的价格，减少API调用，优先使用option_monitor中的股价缓存
+        stock_prices = self._batch_get_stock_prices(quote_ctx, stock_codes, option_monitor)
         
         for i, stock_code in enumerate(stock_codes):
             try:
@@ -149,26 +149,58 @@ class BigOptionsProcessor:
         
         return all_big_options
     
-    def _batch_get_stock_prices(self, quote_ctx, stock_codes: List[str]) -> Dict[str, Dict[str, Any]]:
-        """批量获取股票价格和名称"""
+    def _batch_get_stock_prices(self, quote_ctx, stock_codes: List[str], option_monitor=None) -> Dict[str, Dict[str, Any]]:
+        """批量获取股票价格和名称 - 优先使用option_monitor中的股价缓存"""
         result = {}
         current_time = datetime.now()
         
-        # 检查哪些股票需要更新价格
-        stocks_to_update = []
-        for stock_code in stock_codes:
-            # 如果缓存中有且未过期，使用缓存
-            if stock_code in self.stock_price_cache and stock_code in self.price_cache_time:
-                if (current_time - self.price_cache_time[stock_code]).seconds < 300:  # 5分钟 = 300秒
-                    result[stock_code] = self.stock_price_cache[stock_code]
-                    continue
+        # 如果提供了option_monitor实例，优先使用其股价缓存
+        if option_monitor and hasattr(option_monitor, 'stock_price_cache'):
+            self.logger.info(f"使用option_monitor中的股价缓存")
             
-            # 需要更新的股票
-            stocks_to_update.append(stock_code)
+            for stock_code in stock_codes:
+                # 从option_monitor获取股价
+                if stock_code in option_monitor.stock_price_cache:
+                    price = option_monitor.stock_price_cache[stock_code]
+                    
+                    # 构建股票信息字典
+                    stock_info = {
+                        'price': price,
+                        'name': ''  # option_monitor中可能没有存储名称
+                    }
+                    
+                    # 如果本地缓存中有名称信息，补充名称
+                    if stock_code in self.stock_price_cache and isinstance(self.stock_price_cache[stock_code], dict):
+                        old_info = self.stock_price_cache[stock_code]
+                        if 'name' in old_info and old_info['name']:
+                            stock_info['name'] = old_info['name']
+                    
+                    # 更新结果和本地缓存
+                    result[stock_code] = stock_info
+                    self.stock_price_cache[stock_code] = stock_info
+                    self.price_cache_time[stock_code] = current_time
+                    self.logger.debug(f"从option_monitor获取股价: {stock_code} = {price}")
+                else:
+                    # 如果option_monitor中没有，检查本地缓存
+                    if stock_code in self.stock_price_cache and stock_code in self.price_cache_time:
+                        if (current_time - self.price_cache_time[stock_code]).seconds < 300:  # 5分钟 = 300秒
+                            result[stock_code] = self.stock_price_cache[stock_code]
+                            continue
+        else:
+            # 检查哪些股票需要更新价格
+            for stock_code in stock_codes:
+                # 如果缓存中有且未过期，使用缓存
+                if stock_code in self.stock_price_cache and stock_code in self.price_cache_time:
+                    if (current_time - self.price_cache_time[stock_code]).seconds < 300:  # 5分钟 = 300秒
+                        result[stock_code] = self.stock_price_cache[stock_code]
+                        continue
+        
+        # 找出仍需要更新的股票
+        stocks_to_update = [code for code in stock_codes if code not in result]
         
         if not stocks_to_update:
-            self.logger.info("所有股价都在缓存中，无需更新")
-            return self.stock_price_cache
+            self.logger.info("所有股价都已获取，无需更新")
+            return result
         
         # 批量获取股价和名称
         try:
@@ -218,11 +250,35 @@ class BigOptionsProcessor:
         
         return result
     
-    def get_stock_price(self, quote_ctx, stock_code: str) -> Dict[str, Any]:
-        """获取股票当前价格和名称（带缓存）"""
+    def get_stock_price(self, quote_ctx, stock_code: str, option_monitor=None) -> Dict[str, Any]:
+        """获取股票当前价格和名称（带缓存）- 优先使用option_monitor中的股价缓存"""
         try:
-            # 检查缓存
             current_time = datetime.now()
+            
+            # 如果提供了option_monitor实例，优先使用其股价缓存
+            if option_monitor and hasattr(option_monitor, 'stock_price_cache') and stock_code in option_monitor.stock_price_cache:
+                price = option_monitor.stock_price_cache[stock_code]
+                
+                # 构建股票信息字典
+                stock_info = {
+                    'price': price,
+                    'name': ''  # option_monitor中可能没有存储名称
+                }
+                
+                # 如果本地缓存中有名称信息，补充名称
+                if stock_code in self.stock_price_cache and isinstance(self.stock_price_cache[stock_code], dict):
+                    old_info = self.stock_price_cache[stock_code]
+                    if 'name' in old_info and old_info['name']:
+                        stock_info['name'] = old_info['name']
+                
+                # 更新本地缓存
+                self.stock_price_cache[stock_code] = stock_info
+                self.price_cache_time[stock_code] = current_time
+                self.logger.debug(f"从option_monitor获取股价: {stock_code} = {price}")
+                
+                return stock_info
+            
+            # 检查本地缓存
             if (stock_code in self.stock_price_cache and 
                 stock_code in self.price_cache_time and
                 (current_time - self.price_cache_time[stock_code]).seconds < 300):  # 缓存5分钟
@@ -253,6 +309,13 @@ class BigOptionsProcessor:
                 self.stock_price_cache[stock_code] = stock_info
                 self.price_cache_time[stock_code] = current_time
                 self.logger.debug(f"获取股票信息: {stock_code} = {price} ({name})")
+                
+                # 如果提供了option_monitor实例，同时更新其缓存
+                if option_monitor and hasattr(option_monitor, 'stock_price_cache'):
+                    option_monitor.stock_price_cache[stock_code] = price
+                    if hasattr(option_monitor, 'price_update_time'):
+                        option_monitor.price_update_time[stock_code] = current_time
+                
                 return stock_info
             else:
                 self.logger.warning(f"获取{stock_code}股票信息失败")
@@ -553,8 +616,8 @@ class BigOptionsProcessor:
             self.logger.error(f"获取{stock_code}期权代码失败: {e}")
             return []
     
-    def _get_option_big_trades(self, quote_ctx, option_code: str, stock_code: str) -> List[Dict[str, Any]]:
-        """获取期权大单交易"""
+    def _get_option_big_trades(self, quote_ctx, option_code: str, stock_code: str, option_monitor=None) -> List[Dict[str, Any]]:
+        """获取期权大单交易 - 可选使用option_monitor中的股价缓存"""
         try:
             import futu as ft
             
@@ -574,21 +637,51 @@ class BigOptionsProcessor:
                 # 获取股票当前价格和名称用于对比和显示
                 current_stock_price = 0
                 stock_name = ""
-                try:
-                    ret_stock, stock_snap = quote_ctx.get_market_snapshot([stock_code])
-                    if ret_stock == ft.RET_OK and not stock_snap.empty:
-                        row = stock_snap.iloc[0]
-                        current_stock_price = row['last_price']
-                        stock_name = row.get('name', '') or row.get('stock_name', '')  # 获取股票名称
-                        price_diff = strike_price - current_stock_price if current_stock_price else 0
-                        price_diff_pct = (price_diff / current_stock_price) * 100 if current_stock_price else 0
-                        option_info['stock_price'] = current_stock_price
-                        option_info['stock_name'] = stock_name
-                        option_info['price_diff'] = price_diff
-                        option_info['price_diff_pct'] = price_diff_pct
-                        self.logger.info(f"期权详情 {option_code}: 执行价{strike_price:.2f} vs 股价{current_stock_price:.2f} ({stock_name}), 差价{price_diff:+.2f}({price_diff_pct:+.1f}%), 类型:{option_type}")
-                except Exception as stock_e:
-                    self.logger.debug(f"获取{stock_code}股价用于对比失败: {stock_e}")
+                
+                # 优先使用option_monitor中的股价缓存
+                if option_monitor and hasattr(option_monitor, 'stock_price_cache') and stock_code in option_monitor.stock_price_cache:
+                    current_stock_price = option_monitor.stock_price_cache[stock_code]
+                    # 尝试从本地缓存获取股票名称
+                    if stock_code in self.stock_price_cache and isinstance(self.stock_price_cache[stock_code], dict):
+                        stock_name = self.stock_price_cache[stock_code].get('name', '')
+                    
+                    self.logger.debug(f"使用option_monitor中的股价: {stock_code} = {current_stock_price}")
+                    
+                    # 计算价格差异
+                    price_diff = strike_price - current_stock_price if current_stock_price else 0
+                    price_diff_pct = (price_diff / current_stock_price) * 100 if current_stock_price else 0
+                    
+                    # 更新期权信息
+                    option_info['stock_price'] = current_stock_price
+                    option_info['stock_name'] = stock_name
+                    option_info['price_diff'] = price_diff
+                    option_info['price_diff_pct'] = price_diff_pct
+                    
+                    self.logger.info(f"期权详情 {option_code}: 执行价{strike_price:.2f} vs 股价{current_stock_price:.2f} ({stock_name}), 差价{price_diff:+.2f}({price_diff_pct:+.1f}%), 类型:{option_type}")
+                else:
+                    # 如果没有option_monitor或其中没有股价缓存，则使用API获取
+                    try:
+                        ret_stock, stock_snap = quote_ctx.get_market_snapshot([stock_code])
+                        if ret_stock == ft.RET_OK and not stock_snap.empty:
+                            row = stock_snap.iloc[0]
+                            current_stock_price = row['last_price']
+                            stock_name = row.get('name', '') or row.get('stock_name', '')  # 获取股票名称
+                            price_diff = strike_price - current_stock_price if current_stock_price else 0
+                            price_diff_pct = (price_diff / current_stock_price) * 100 if current_stock_price else 0
+                            option_info['stock_price'] = current_stock_price
+                            option_info['stock_name'] = stock_name
+                            option_info['price_diff'] = price_diff
+                            option_info['price_diff_pct'] = price_diff_pct
+                            
+                            # 如果有option_monitor，更新其股价缓存
+                            if option_monitor and hasattr(option_monitor, 'stock_price_cache'):
+                                option_monitor.stock_price_cache[stock_code] = current_stock_price
+                                if hasattr(option_monitor, 'price_update_time'):
+                                    option_monitor.price_update_time[stock_code] = datetime.now()
+                            
+                            self.logger.info(f"期权详情 {option_code}: 执行价{strike_price:.2f} vs 股价{current_stock_price:.2f} ({stock_name}), 差价{price_diff:+.2f}({price_diff_pct:+.1f}%), 类型:{option_type}")
+                    except Exception as stock_e:
+                        self.logger.debug(f"获取{stock_code}股价用于对比失败: {stock_e}")
             except Exception as e:
                 self.logger.debug(f"解析{option_code}基本信息失败: {e}")
             

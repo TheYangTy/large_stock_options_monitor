@@ -77,20 +77,33 @@ class OptionMonitor:
             raise
     
     def _subscribe_stock_quotes(self, stock_codes):
-        """订阅股票报价"""
+        """订阅股票报价 - 只订阅尚未订阅的股票"""
         try:
             if not stock_codes:
+                return
+            
+            # 跟踪已订阅的股票代码
+            if not hasattr(self, 'subscribed_stocks'):
+                self.subscribed_stocks = set()
+            
+            # 过滤出尚未订阅的股票
+            new_stocks = [code for code in stock_codes if code not in self.subscribed_stocks]
+            
+            if not new_stocks:
+                self.logger.debug("所有股票已订阅，无需重新订阅")
                 return
                 
             # 每次最多订阅50个，避免超出API限制
             batch_size = 50
-            for i in range(0, len(stock_codes), batch_size):
-                batch_codes = stock_codes[i:i+batch_size]
+            for i in range(0, len(new_stocks), batch_size):
+                batch_codes = new_stocks[i:i+batch_size]
                 
                 # 订阅股票报价
                 ret, data = self.quote_ctx.subscribe(batch_codes, [ft.SubType.QUOTE])
                 if ret == ft.RET_OK:
                     self.logger.info(f"成功订阅 {len(batch_codes)} 只股票的报价")
+                    # 更新已订阅列表
+                    self.subscribed_stocks.update(batch_codes)
                 else:
                     self.logger.warning(f"订阅股票报价失败: {data}")
                 
@@ -463,8 +476,11 @@ class OptionMonitor:
         # 设置期权推送回调
         self.quote_ctx.set_handler(OptionTickerHandler(self))
         
-        # 确保股票报价订阅是最新的
+        # 初始化股票报价订阅
         self._subscribe_stock_quotes(MONITOR_STOCKS)
+        
+        # 初始化订阅更新计数器
+        subscription_update_counter = 0
         
         while self.is_running:
             try:
@@ -472,11 +488,12 @@ class OptionMonitor:
                 self.logger.info("执行完整大单汇总...")
                 self._hourly_big_options_check()
                 
-                # 更新订阅的期权列表
-                self._update_option_subscriptions()
-                
-                # 刷新股票报价订阅
-                self._subscribe_stock_quotes(MONITOR_STOCKS)
+                # 每5分钟更新一次期权订阅列表
+                subscription_update_counter += 1
+                if subscription_update_counter >= 5:
+                    self.logger.info("定期更新期权订阅列表...")
+                    self._update_option_subscriptions()
+                    subscription_update_counter = 0
                 
                 # 等待下一次监控 (1分钟)
                 time.sleep(MONITOR_TIME['interval'])
@@ -571,9 +588,18 @@ class OptionMonitor:
                     self.logger.error("重新连接失败，跳过本次检查")
                     return
             
-            # 获取最近2天的大单期权
+            # 先获取所有监控股票的当前股价，确保股价缓存是最新的
+            self.logger.info("预先获取所有监控股票的当前股价...")
+            for stock_code in MONITOR_STOCKS:
+                try:
+                    current_price = self.get_stock_price(stock_code)
+                    self.logger.info(f"{stock_code}当前股价: {current_price}")
+                except Exception as e:
+                    self.logger.error(f"获取{stock_code}股价失败: {e}")
+            
+            # 获取最近2天的大单期权，传递self作为option_monitor参数，共用股价信息
             big_options = self.big_options_processor.get_recent_big_options(
-                self.quote_ctx, MONITOR_STOCKS
+                self.quote_ctx, MONITOR_STOCKS, option_monitor=self
             )
             
             if big_options:
@@ -707,18 +733,8 @@ class OptionMonitor:
             self.logger.error(traceback.format_exc())
     
     def _update_option_subscriptions(self):
-        """更新期权订阅列表"""
+        """更新期权订阅列表 - 智能更新，避免不必要的取消订阅"""
         try:
-            # 取消所有现有订阅
-            if self.subscribed_options:
-                try:
-                    self.quote_ctx.unsubscribe_all()
-                    self.logger.info("已取消所有订阅，准备更新")
-                    self.subscribed_options.clear()
-                except Exception as e:
-                    self.logger.warning(f"取消订阅异常: {e}")
-                    self.logger.warning(traceback.format_exc())
-            
             # 获取最活跃的期权进行订阅
             active_options = []
             
@@ -732,8 +748,43 @@ class OptionMonitor:
                     self.logger.debug(f"获取{stock_code}期权失败: {e}")
                     self.logger.debug(traceback.format_exc())
             
-            # 订阅这些期权
-            self._subscribe_options(active_options)
+            # 计算需要新增和需要取消的订阅
+            active_options_set = set(active_options)
+            
+            # 需要新增的订阅
+            new_options = [code for code in active_options if code not in self.subscribed_options]
+            
+            # 需要取消的订阅
+            obsolete_options = [code for code in self.subscribed_options if code not in active_options_set]
+            
+            # 取消不再需要的期权订阅
+            if obsolete_options:
+                try:
+                    # 每次最多取消50个，避免API限制
+                    batch_size = 50
+                    for i in range(0, len(obsolete_options), batch_size):
+                        batch_codes = obsolete_options[i:i+batch_size]
+                        ret, data = self.quote_ctx.unsubscribe(batch_codes, [ft.SubType.TICKER])
+                        if ret == ft.RET_OK:
+                            self.logger.info(f"已取消 {len(batch_codes)} 个期权的订阅")
+                            # 更新已订阅列表
+                            for code in batch_codes:
+                                if code in self.subscribed_options:
+                                    self.subscribed_options.remove(code)
+                        else:
+                            self.logger.warning(f"取消期权订阅失败: {data}")
+                        
+                        # 避免API调用过于频繁
+                        time.sleep(0.5)
+                except Exception as e:
+                    self.logger.warning(f"取消期权订阅异常: {e}")
+                    self.logger.warning(traceback.format_exc())
+            
+            # 订阅新的期权
+            if new_options:
+                self._subscribe_options(new_options)
+            else:
+                self.logger.debug("没有新的期权需要订阅")
             
         except Exception as e:
             self.logger.error(f"更新期权订阅异常: {e}")

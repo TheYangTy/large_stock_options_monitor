@@ -19,6 +19,7 @@ try:
     import futu as ft
     import akshare as ak
     import tushare as ts
+    import json
 except ImportError as e:
     print(f"请安装必要的依赖包: {e}")
     print("pip install futu-api akshare tushare")
@@ -49,10 +50,131 @@ class OptionMonitor:
         self.price_update_time = {}  # 股价更新时间
         self.option_chain_cache = {}  # 期权链缓存: {(owner_code, expiry_date): DataFrame}
         self.option_chain_cache_time = {}  # 期权链缓存时间
+        self.stock_prices_file = os.path.join(os.path.dirname(DATA_CONFIG['csv_path']), 'stock_prices.json')
+        self.option_chains_file = os.path.join(os.path.dirname(DATA_CONFIG['csv_path']), 'option_chains.json')
+        self._last_option_chains_save = None  # 期权链缓存最近一次保存时间
+        
+        # 加载缓存
+        self._load_stock_prices_cache()
+        self._load_option_chains_cache()
         
         # 初始化Futu连接
         self._init_futu_connection()
         
+    def _load_stock_prices_cache(self):
+        """从文件加载股价缓存"""
+        try:
+            if os.path.exists(self.stock_prices_file):
+                with open(self.stock_prices_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    
+                if 'prices' in data:
+                    # 转换为内部缓存格式
+                    for stock_code, stock_info in data['prices'].items():
+                        self.stock_price_cache[stock_code] = stock_info
+                        # 将字符串时间转换为datetime对象
+                        if 'update_time' in stock_info:
+                            try:
+                                update_time = datetime.fromisoformat(stock_info['update_time'])
+                                self.price_update_time[stock_code] = update_time
+                            except:
+                                self.price_update_time[stock_code] = datetime.now()
+                
+                self.logger.info(f"已从文件加载 {len(self.stock_price_cache)} 只股票的价格缓存")
+        except Exception as e:
+            self.logger.warning(f"加载股价缓存失败: {e}")
+    
+    def _save_stock_prices_cache(self):
+        """保存股价缓存到文件"""
+        try:
+            # 准备数据
+            data = {
+                'update_time': datetime.now().isoformat(),
+                'prices': {}
+            }
+            
+            # 转换内部缓存格式为JSON格式
+            for stock_code, stock_info in self.stock_price_cache.items():
+                if isinstance(stock_info, dict):
+                    # 复制一份，避免修改原始数据
+                    info_copy = stock_info.copy()
+                    # 添加更新时间
+                    if stock_code in self.price_update_time:
+                        info_copy['update_time'] = self.price_update_time[stock_code].isoformat()
+                    data['prices'][stock_code] = info_copy
+                else:
+                    # 兼容旧格式
+                    data['prices'][stock_code] = {
+                        'price': stock_info,
+                        'name': '',
+                        'update_time': datetime.now().isoformat()
+                    }
+            
+            # 确保目录存在
+            os.makedirs(os.path.dirname(self.stock_prices_file), exist_ok=True)
+            
+            # 保存到文件
+            with open(self.stock_prices_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            
+            self.logger.debug(f"已保存 {len(self.stock_price_cache)} 只股票的价格缓存到文件")
+        except Exception as e:
+            self.logger.warning(f"保存股价缓存失败: {e}")
+    
+    def _load_option_chains_cache(self):
+        """从文件加载期权链缓存"""
+        try:
+            if os.path.exists(self.option_chains_file):
+                with open(self.option_chains_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                self.option_chain_cache = {}
+                self.option_chain_cache_time = {}
+                # 反序列化为内存结构：保持 DataFrame 为 DataFrame
+                chains = data.get('chains', {})
+                for key, payload in chains.items():
+                    # key 形如 "HK.00700|2025-09-26"
+                    records = payload.get('records', [])
+                    ts = payload.get('update_time')
+                    df = pd.DataFrame.from_records(records) if records else pd.DataFrame()
+                    self.option_chain_cache[key] = df
+                    if ts:
+                        try:
+                            self.option_chain_cache_time[key] = datetime.fromisoformat(ts)
+                        except:
+                            self.option_chain_cache_time[key] = datetime.now()
+                self.logger.info(f"已从文件加载 {len(self.option_chain_cache)} 条期权链缓存")
+        except Exception as e:
+            self.logger.warning(f"加载期权链缓存失败: {e}")
+    
+    def _save_option_chains_cache(self, throttle_seconds: int = 10):
+        """保存期权链缓存到文件（节流避免频繁写盘）"""
+        try:
+            now = datetime.now()
+            if self._last_option_chains_save and (now - self._last_option_chains_save).total_seconds() < throttle_seconds:
+                return
+            data = {
+                'update_time': now.isoformat(),
+                'chains': {}
+            }
+            for key, df in self.option_chain_cache.items():
+                if df is not None and not df.empty:
+                    data['chains'][key] = {
+                        'records': df.to_dict(orient='records'),
+                        'update_time': (self.option_chain_cache_time.get(key, now)).isoformat()
+                    }
+                else:
+                    data['chains'][key] = {
+                        'records': [],
+                        'update_time': (self.option_chain_cache_time.get(key, now)).isoformat()
+                    }
+            os.makedirs(os.path.dirname(self.option_chains_file), exist_ok=True)
+            with open(self.option_chains_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            self._last_option_chains_save = now
+            self.logger.debug(f"已保存 {len(self.option_chain_cache)} 条期权链缓存到文件")
+        except Exception as e:
+            self.logger.warning(f"保存期权链缓存失败: {e}")
+    
     def _init_futu_connection(self):
         """初始化Futu OpenD连接"""
         try:
@@ -121,16 +243,31 @@ class OptionMonitor:
             if stock_code in self.stock_price_cache and stock_code in self.price_update_time:
                 cache_time = self.price_update_time[stock_code]
                 if (datetime.now() - cache_time).seconds < 60:  # 缓存1分钟内有效
-                    self.logger.debug(f"使用缓存的股价: {stock_code} = {self.stock_price_cache[stock_code]}")
-                    return self.stock_price_cache[stock_code]
+                    cached = self.stock_price_cache[stock_code]
+                    self.logger.debug(f"使用缓存的股价: {stock_code} = {cached}")
+                    # 兼容两种缓存结构：float 或 {'price': x, 'name': y}
+                    if isinstance(cached, dict):
+                        return cached.get('price', 0.0)
+                    return cached
             
             # 缓存无效，获取实时股价
             ret_snap, snap_data = self.quote_ctx.get_market_snapshot([stock_code])
             if ret_snap == ft.RET_OK and not snap_data.empty:
                 price = snap_data.iloc[0]['last_price']
                 # 更新缓存
-                self.stock_price_cache[stock_code] = price
+                if isinstance(price, dict):
+                    self.stock_price_cache[stock_code] = price
+                else:
+                    # 兼容旧格式，转换为新格式
+                    self.stock_price_cache[stock_code] = {
+                        'price': price,
+                        'name': stock_name if 'stock_name' in locals() else ''
+                    }
                 self.price_update_time[stock_code] = datetime.now()
+                
+                # 定期保存股价缓存到文件
+                if len(self.stock_price_cache) % 5 == 0:  # 每更新5个股价保存一次
+                    self._save_stock_prices_cache()
                 self.logger.debug(f"获取实时股价: {stock_code} = {price}")
                 return price
             else:
@@ -305,6 +442,11 @@ class OptionMonitor:
                                     self.option_chain_cache[cache_key] = oc_df
                                     self.option_chain_cache_time[cache_key] = current_time
                                     self.logger.debug(f"缓存期权链数据: {cache_key}, {len(oc_df)}个期权")
+                                    # 持久化期权链缓存
+                                    try:
+                                        self._save_option_chains_cache()
+                                    except Exception as _e:
+                                        self.logger.debug(f"保存期权链缓存失败(略过): {_e}")
                             
                             # 从期权链中查找匹配的期权代码
                             if oc_df is not None and not oc_df.empty:

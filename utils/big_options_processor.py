@@ -4,6 +4,7 @@
 """
 
 import json
+import os
 import logging
 import pandas as pd
 import time
@@ -25,6 +26,26 @@ class BigOptionsProcessor:
         self.price_cache_time = {}   # 缓存时间
         self.last_option_volumes = {}  # 缓存上一次的期权交易量
     
+    def _load_stock_info_from_file(self, stock_code: str) -> Optional[Dict[str, Any]]:
+        """从 data/stock_prices.json 读取单只股票信息 {'price': float, 'name': str}"""
+        try:
+            base_dir = os.path.dirname(DATA_CONFIG['csv_path'])
+            prices_file = os.path.join(base_dir, 'stock_prices.json')
+            if not os.path.exists(prices_file):
+                return None
+            with open(prices_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            info = data.get('prices', {}).get(stock_code)
+            if isinstance(info, dict):
+                # 统一返回格式
+                price = info.get('price')
+                name = info.get('name', '')
+                if isinstance(price, (int, float)):
+                    return {'price': float(price), 'name': name}
+            return None
+        except Exception:
+            return None
+
     def get_recent_big_options(self, quote_ctx, stock_codes: List[str], option_monitor=None) -> List[Dict[str, Any]]:
         """获取最近2天的大单期权 - 可选使用option_monitor中的股价缓存"""
         all_big_options = []
@@ -51,7 +72,7 @@ class BigOptionsProcessor:
                 
                 # 获取该股票的所有期权代码
                 try:
-                    option_codes = self._get_option_codes(quote_ctx, stock_code)
+                    option_codes = self._get_option_codes(quote_ctx, stock_code, option_monitor)
                 except Exception as e:
                     self.logger.error(f"获取{stock_code}期权代码异常，跳过此股票: {e}")
                     failed_stocks.add(stock_code)
@@ -407,30 +428,39 @@ class BigOptionsProcessor:
                 # 如果提供了option_monitor，优先使用其股价缓存
                 if option_monitor is not None:
                     stock_info = option_monitor.get_stock_price(stock_code)
-                    if stock_info and 'price' in stock_info and stock_info['price'] > 0:
-                        current_price = stock_info['price']
+                    # 兼容 float 或 dict 两种返回
+                    if isinstance(stock_info, (int, float)):
+                        current_price = float(stock_info)
+                        self.logger.info(f"{stock_code}当前股价(来自缓存): {current_price}")
+                    elif isinstance(stock_info, dict) and stock_info.get('price'):
+                        current_price = float(stock_info['price'])
                         self.logger.info(f"{stock_code}当前股价(来自缓存): {current_price}")
                 
-                # 如果没有从缓存获取到有效股价，则使用默认价格
+                # 如果没有从缓存获取到有效股价，优先从文件缓存读取；再不行才用默认价格
                 if current_price is None or current_price <= 0:
-                    # 使用默认价格作为回退
-                    if stock_code == 'HK.00700':  # 腾讯
-                        current_price = 600.0
-                    elif stock_code == 'HK.09988':  # 阿里巴巴
-                        current_price = 80.0
-                    elif stock_code == 'HK.03690':  # 美团
-                        current_price = 120.0
-                    elif stock_code == 'HK.01810':  # 小米
-                        current_price = 15.0
-                    elif stock_code == 'HK.09618':  # 京东
-                        current_price = 120.0
-                    elif stock_code == 'HK.02318':  # 中国平安
-                        current_price = 40.0
-                    elif stock_code == 'HK.00388':  # 港交所
-                        current_price = 300.0
+                    file_info = self._load_stock_info_from_file(stock_code)
+                    if file_info and file_info.get('price'):
+                        current_price = float(file_info['price'])
+                        self.logger.info(f"{stock_code}当前股价(来自文件缓存): {current_price}")
                     else:
-                        current_price = 100.0  # 默认价格
-                    self.logger.info(f"{stock_code}当前股价(使用默认价格): {current_price}")
+                        # 使用默认价格作为回退
+                        if stock_code == 'HK.00700':  # 腾讯
+                            current_price = 600.0
+                        elif stock_code == 'HK.09988':  # 阿里巴巴
+                            current_price = 80.0
+                        elif stock_code == 'HK.03690':  # 美团
+                            current_price = 120.0
+                        elif stock_code == 'HK.01810':  # 小米
+                            current_price = 15.0
+                        elif stock_code == 'HK.09618':  # 京东
+                            current_price = 120.0
+                        elif stock_code == 'HK.02318':  # 中国平安
+                            current_price = 40.0
+                        elif stock_code == 'HK.00388':  # 港交所
+                            current_price = 300.0
+                        else:
+                            current_price = 100.0  # 默认价格
+                        self.logger.info(f"{stock_code}当前股价(使用默认价格): {current_price}")
                 
                 # 基于股价设定期权执行价格过滤范围
                 price_range = OPTION_FILTER.get('price_range', 0.2)  # 配置中是20%
@@ -664,49 +694,40 @@ class BigOptionsProcessor:
                     
                     self.logger.info(f"期权详情 {option_code}: 执行价{strike_price:.2f} vs 股价{current_stock_price:.2f} ({stock_name}), 差价{price_diff:+.2f}({price_diff_pct:+.1f}%), 类型:{option_type}")
                 else:
-                    # 如果没有option_monitor或其中没有股价缓存，则使用默认价格
-                    # 不再直接请求市场快照，避免API调用过多
-                    self.logger.debug(f"未找到{stock_code}的股价缓存，使用默认价格")
-                    
-                    # 使用默认价格
-                    if stock_code == 'HK.00700':  # 腾讯
-                        current_stock_price = 600.0
-                        stock_name = "腾讯控股"
-                    elif stock_code == 'HK.09988':  # 阿里巴巴
-                        current_stock_price = 130.0
-                        stock_name = "阿里巴巴-SW"
-                    elif stock_code == 'HK.03690':  # 美团
-                        current_stock_price = 120.0
-                        stock_name = "美团-W"
-                    elif stock_code == 'HK.01810':  # 小米
-                        current_stock_price = 15.0
-                        stock_name = "小米集团-W"
-                    elif stock_code == 'HK.09618':  # 京东
-                        current_stock_price = 120.0
-                        stock_name = "京东集团-SW"
-                    elif stock_code == 'HK.02318':  # 中国平安
-                        current_stock_price = 40.0
-                        stock_name = "中国平安"
-                    elif stock_code == 'HK.00388':  # 港交所
-                        current_stock_price = 300.0
-                        stock_name = "香港交易所"
-                    else:
-                        current_stock_price = 100.0
-                        stock_name = stock_code
-                            price_diff = strike_price - current_stock_price if current_stock_price else 0
-                            price_diff_pct = (price_diff / current_stock_price) * 100 if current_stock_price else 0
-                            option_info['stock_price'] = current_stock_price
-                            option_info['stock_name'] = stock_name
-                            option_info['price_diff'] = price_diff
-                            option_info['price_diff_pct'] = price_diff_pct
-                            
-                            # 如果有option_monitor，更新其股价缓存
-                            if option_monitor and hasattr(option_monitor, 'stock_price_cache'):
-                                option_monitor.stock_price_cache[stock_code] = current_stock_price
-                                if hasattr(option_monitor, 'price_update_time'):
-                                    option_monitor.price_update_time[stock_code] = datetime.now()
-                            
-                            self.logger.info(f"期权详情 {option_code}: 执行价{strike_price:.2f} vs 股价{current_stock_price:.2f} ({stock_name}), 差价{price_diff:+.2f}({price_diff_pct:+.1f}%), 类型:{option_type}")
+                    try:
+                        # 如果没有option_monitor或其中没有股价缓存，则优先读取文件缓存；再不行才用默认价格
+                        file_info = self._load_stock_info_from_file(stock_code)
+                        if file_info and file_info.get('price'):
+                            current_stock_price = float(file_info['price'])
+                            stock_name = file_info.get('name', '') or stock_code
+                            self.logger.debug(f"未找到{stock_code}的内存缓存，使用文件缓存价格: {current_stock_price}")
+                        else:
+                            # 使用默认价格（兜底）
+                            self.logger.debug(f"未找到{stock_code}的缓存，使用默认价格")
+                            if stock_code == 'HK.00700':  # 腾讯
+                                current_stock_price = 600.0
+                                stock_name = "腾讯控股"
+                            elif stock_code == 'HK.09988':  # 阿里巴巴
+                                current_stock_price = 130.0
+                                stock_name = "阿里巴巴-SW"
+                            elif stock_code == 'HK.03690':  # 美团
+                                current_stock_price = 120.0
+                                stock_name = "美团-W"
+                            elif stock_code == 'HK.01810':  # 小米
+                                current_stock_price = 15.0
+                                stock_name = "小米集团-W"
+                            elif stock_code == 'HK.09618':  # 京东
+                                current_stock_price = 120.0
+                                stock_name = "京东集团-SW"
+                            elif stock_code == 'HK.02318':  # 中国平安
+                                current_stock_price = 40.0
+                                stock_name = "中国平安"
+                            elif stock_code == 'HK.00388':  # 港交所
+                                current_stock_price = 300.0
+                                stock_name = "香港交易所"
+                            else:
+                                current_stock_price = 100.0
+                                stock_name = stock_code
                     except Exception as stock_e:
                         self.logger.debug(f"获取{stock_code}股价用于对比失败: {stock_e}")
             except Exception as e:

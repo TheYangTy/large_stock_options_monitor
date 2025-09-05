@@ -312,7 +312,7 @@ print('企微机器人测试:', '成功' if success else '失败')
 配置完成后，使用增强版监控脚本：
 
 ```bash
-python start_enhanced_monitor.py
+
 ```
 
 系统将自动：

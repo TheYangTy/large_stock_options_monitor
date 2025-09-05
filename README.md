@@ -75,17 +75,14 @@ pip install -r requirements.txt
    python option_monitor.py
    ```
 
-3. 或运行增强版监控程序（包含更多功能）
-   ```bash
-   python start_enhanced_monitor.py
-   ```
 
-4. 启动Web界面（可选）
+
+3. 启动Web界面（可选）
    ```bash
    python web_dashboard.py
    ```
 
-5. 使用单次运行模式（测试用）
+4. 使用单次运行模式（测试用）
    ```bash
    python option_monitor.py --once
    ```

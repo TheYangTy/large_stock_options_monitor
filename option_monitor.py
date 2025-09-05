@@ -796,8 +796,12 @@ class OptionMonitor:
         
         for stock_code, options in stock_groups.items():
             stock_turnover = sum(opt.get('turnover', 0) for opt in options)
-            # 获取股票名称（从第一个期权信息中提取）
+            # 获取股票名称（优先从期权数据，其次从缓存补齐）
             stock_name = options[0].get('stock_name', '') if options else ''
+            if not stock_name:
+                cached = self.stock_price_cache.get(stock_code)
+                if isinstance(cached, dict):
+                    stock_name = cached.get('name', '') or stock_name
             stock_display = f"{stock_code} {stock_name}" if stock_name else stock_code
             print(f"\n📈 {stock_display}: {len(options)}笔, {stock_turnover/10000:.1f}万港币")
             
@@ -825,9 +829,13 @@ class OptionMonitor:
                 
                 direction_display = f", {direction_text}" if direction_text else ""
                 
-                print(f"   {i}. {opt.get('option_code', 'N/A')}: "
-                      f"{opt.get('volume', 0):,}手, "
-                      f"{opt.get('turnover', 0)/10000:.1f}万港币{direction_display}{time_suffix}")
+                print(
+                    f"   {i}. {opt.get('option_code', 'N/A')}: "
+                    f"{opt.get('volume', 0):,}手, "
+                    f"{opt.get('turnover', 0)/10000:.1f}万港币, "
+                    f"价: {opt.get('price', opt.get('last_price', 0)):.4f}"
+                    f"{direction_display}{time_suffix}"
+                )
         
         print("="*60 + "\n")
     

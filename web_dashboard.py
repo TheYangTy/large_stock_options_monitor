@@ -54,7 +54,7 @@ logger = setup_logger()
 # 导入企微通知模块和方向分析器
 try:
     from utils.wework_notifier import WeWorkNotifier
-    from utils.direction_analyzer import DirectionAnalyzer
+    
     wework_available = True
 except ImportError:
     wework_available = False
@@ -67,7 +67,7 @@ big_options_processor = BigOptionsProcessor()
 
 # 初始化企微通知器和方向分析器
 wework_notifier = None
-direction_analyzer = DirectionAnalyzer()
+# direction analyzer removed per requirement
 earnings_calendar = EarningsCalendar()
 last_data_hash = None  # 用于跟踪数据变化
 
@@ -207,6 +207,62 @@ def get_big_options_summary():
         
         # 直接从缓存文件加载数据，不再调用Futu API
         summary = big_options_processor.load_current_summary()
+
+        # 也从 stock_prices.json 补齐名称，保持与摘要一致
+        stock_name_map = {}
+        try:
+            sp_path = os.path.join('data', 'stock_prices.json')
+            if os.path.exists(sp_path):
+                with open(sp_path, 'r', encoding='utf-8') as f:
+                    sp = json.load(f)
+                prices = sp.get('prices') if isinstance(sp, dict) else None
+                if isinstance(prices, dict):
+                    for code, info in prices.items():
+                        if isinstance(info, dict):
+                            name = info.get('name')
+                            if name:
+                                stock_name_map[code] = name
+        except Exception as _e:
+            logger.warning(f"读取stock_prices.json失败: {_e}")
+
+        if summary and stock_name_map:
+            bos = summary.get('big_options', [])
+            if isinstance(bos, list):
+                for opt in bos:
+                    if isinstance(opt, dict):
+                        code = opt.get('stock_code')
+                        if code and not opt.get('stock_name'):
+                            nm = stock_name_map.get(code)
+                            if nm:
+                                opt['stock_name'] = nm
+
+        # 从 data/stock_prices.json 读取股票名称映射，补齐 big_options 的 stock_name
+        stock_name_map = {}
+        try:
+            sp_path = os.path.join('data', 'stock_prices.json')
+            if os.path.exists(sp_path):
+                with open(sp_path, 'r', encoding='utf-8') as f:
+                    sp = json.load(f)
+                # 兼容结构: {"prices": {"HK.00700": {"price": 600, "name": "腾讯"}}}
+                prices = sp.get('prices') if isinstance(sp, dict) else None
+                if isinstance(prices, dict):
+                    for code, info in prices.items():
+                        if isinstance(info, dict):
+                            name = info.get('name')
+                            if name:
+                                stock_name_map[code] = name
+        except Exception as _e:
+            logger.warning(f"读取stock_prices.json失败: {_e}")
+
+        big_options = summary.get('big_options', []) if summary else []
+        if isinstance(big_options, list) and stock_name_map:
+            for opt in big_options:
+                if isinstance(opt, dict):
+                    code = opt.get('stock_code')
+                    if code and not opt.get('stock_name'):
+                        nm = stock_name_map.get(code)
+                        if nm:
+                            opt['stock_name'] = nm
         
         logger.debug(f"从缓存加载汇总数据: {summary is not None}")
         if summary:
@@ -239,9 +295,9 @@ def get_big_options_summary():
                     option['option_type'] = '未知'
             
             # 确保交易方向字段存在
-            if 'direction' not in option or not option['direction'] or option['direction'] == '未知':
-                # 使用方向分析器推断交易方向
-                option['direction'] = direction_analyzer.analyze_direction(option)
+            # 去掉交易方向推断
+            # if 'direction' not in option or not option['direction'] or option['direction'] == '未知':
+            #     option['direction'] = direction_analyzer.analyze_direction(option)
                 
                 # 如果方向仍然是未知，根据期权类型和成交量/价格变化推断
                 if option['direction'] == '未知':
@@ -267,7 +323,8 @@ def get_big_options_summary():
         data_changed = last_data_hash is not None and current_data_hash != last_data_hash
         
         # 强制发送大单数据到企微
-        if wework_notifier and (is_first_load or data_changed):
+        # 推送逻辑已迁移到 option_monitor.py，此处禁用
+        if False:
             try:
                 # 发送汇总通知
                 total_count = summary.get('total_count', 0)
@@ -313,18 +370,13 @@ def get_big_options_summary():
                             volume = option.get('volume', 0)
                             turnover = option.get('turnover', 0)
                             
-                            message += f"\n{i+1}. {stock_display} {option_code} {option_type} {direction} {volume}手 {turnover:,.0f}港币"
+                            message += f"\n{i+1}. {stock_display} {option_code} {option_type} {volume}手 {turnover:,.0f}港币"
                         
                         if new_count > 5:
                             message += f"\n... 还有 {new_count - 5} 笔新增大单 (详见网页)"
                         
-                        # 直接使用企微通知器发送消息
-                        logger.info(f"正在发送企微通知: {new_count}笔新增大单")
-                        success = wework_notifier.send_text_message(message)
-                        if success:
-                            logger.info(f"✅ 企微通知发送成功: {new_count}笔新增大单")
-                        else:
-                            logger.error("❌ 企微通知发送失败")
+                        # 推送逻辑已迁移到 option_monitor.py，此处禁用发送
+                        logger.info("已禁用：推送由 option_monitor.py 负责，此处不再发送企微通知")
                     else:
                         logger.info("没有新增大单，跳过推送")
             except Exception as e:
@@ -342,7 +394,7 @@ def get_big_options_summary():
             'statistics': summary.get('statistics', {}),
             'big_options': big_options,
             'filter_conditions': summary.get('filter_conditions', {}),
-            'debug_info': f"成功从缓存加载 {summary.get('total_count', 0)} 笔交易"
+            'debug_info': f"成功从缓存加载 {summary.get('total_count', 0)} 笔交易，并基于stock_prices.json补齐{len(stock_name_map) if 'stock_name_map' in locals() else 0}个名称"
         }
         
         return jsonify(result)
@@ -458,34 +510,14 @@ def stop_monitor():
 
 @app.route('/api/send_wework_test')
 def send_wework_test():
-    """测试企微推送"""
-    if wework_notifier:
-        try:
-            success = wework_notifier.test_connection()
-            if success:
-                return jsonify({
-                    'status': 'success',
-                    'message': '企微测试消息发送成功'
-                })
-            else:
-                return jsonify({
-                    'status': 'error',
-                    'message': '企微测试消息发送失败'
-                })
-        except Exception as e:
-            return jsonify({
-                'status': 'error',
-                'message': f'企微测试异常: {str(e)}'
-            })
-    else:
-        return jsonify({
-            'status': 'error',
-            'message': '企微通知器未初始化'
-        })
+    """已禁用：推送逻辑统一由 option_monitor.py 负责"""
+    return jsonify({'status': 'error', 'message': '已禁用：请在 option_monitor.py 中进行推送测试'})
 
 @app.route('/api/force_push')
 def force_push():
-    """强制推送大单数据到企微"""
+    """已禁用：推送逻辑统一由 option_monitor.py 负责"""
+    return jsonify({'status': 'error', 'message': '已禁用：请在 option_monitor.py 中进行推送'})
+    return jsonify({'status': 'error', 'message': '已禁用：请在 option_monitor.py 中进行推送'})
     if not wework_notifier:
         return jsonify({
             'status': 'error',
@@ -506,6 +538,31 @@ def force_push():
         total_count = len(big_options)
         statistics = summary.get('statistics', {})
         total_turnover = statistics.get('total_turnover', 0)
+
+        # 从 data/stock_prices.json 补齐股票名称
+        try:
+            stock_name_map = {}
+            sp_path = os.path.join('data', 'stock_prices.json')
+            if os.path.exists(sp_path):
+                with open(sp_path, 'r', encoding='utf-8') as f:
+                    sp = json.load(f)
+                prices = sp.get('prices') if isinstance(sp, dict) else None
+                if isinstance(prices, dict):
+                    for code, info in prices.items():
+                        if isinstance(info, dict):
+                            nm = info.get('name')
+                            if nm:
+                                stock_name_map[code] = nm
+            if isinstance(big_options, list) and stock_name_map:
+                for opt in big_options:
+                    if isinstance(opt, dict):
+                        code = opt.get('stock_code')
+                        if code and not opt.get('stock_name'):
+                            nm = stock_name_map.get(code)
+                            if nm:
+                                opt['stock_name'] = nm
+        except Exception as _e:
+            logger.warning(f"force_push 补齐名称失败: {_e}")
         
         if total_count == 0:
             return jsonify({
@@ -552,7 +609,9 @@ def force_push():
                 volume = option.get('volume', 0)
                 turnover = option.get('turnover', 0)
                 
-                message += f"\n{i+1}. {stock_code} {option_code} {option_type} {direction} {volume}手 {turnover:,.0f}港币"
+                stock_name = option.get('stock_name', '')
+                stock_display = f"{stock_name}({stock_code})" if stock_name else stock_code
+                message += f"\n{i+1}. {stock_display} {option_code} {option_type} {volume}手 {turnover:,.0f}港币"
             
             if total_count > 5:
                 message += f"\n... 还有 {total_count - 5} 笔大单 (详见网页)"
@@ -600,13 +659,16 @@ def force_push():
                 volume = option.get('volume', 0)
                 turnover = option.get('turnover', 0)
                 
-                message += f"\n{i+1}. {stock_code} {option_code} {option_type} {direction} {volume}手 {turnover:,.0f}港币"
+                stock_name = option.get('stock_name', '')
+                stock_display = f"{stock_name}({stock_code})" if stock_name else stock_code
+                message += f"\n{i+1}. {stock_display} {option_code} {option_type} {volume}手 {turnover:,.0f}港币"
             
             if new_count > 5:
                 message += f"\n... 还有 {new_count - 5} 笔新增大单 (详见网页)"
         
         # 发送消息
-        success = wework_notifier.send_text_message(message)
+        logger.info("已禁用：web_dashboard 不再直接发送企微通知")
+        success = False
         
         if success:
             if force_all:

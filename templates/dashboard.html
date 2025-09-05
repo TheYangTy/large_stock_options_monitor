@@ -134,12 +134,13 @@
                                 <thead>
                                     <tr>
                                         <th>股票代码</th>
+                                        <th>股票名称</th>
                                         <th>正股股价</th>
                                         <th>期权代码</th>
                                         <th>执行价格</th>
                                         <th>到期日</th>
                                         <th>期权类型</th>
-                                        <th>交易方向</th>
+
                                         <th>期权价格</th>
                                         <th>成交量</th>
                                         <th>成交额</th>
@@ -338,9 +339,7 @@
                             }
                             
                             // 解析交易方向
-                            const tradeDirection = option.direction ? 
-                                { type: 'known', badge: option.direction.includes('买') ? 'badge-buy' : 'badge-sell', text: option.direction } : 
-                                parseTradeDirection(option.trade_direction);
+                            // 去掉交易方向
                             
                             // 解析期权代码获取执行价格和到期日
                             const parsed = parseOptionCode(option.option_code);
@@ -364,12 +363,13 @@
                             
                             row.innerHTML = `
                                 <td>${option.stock_code || ''}</td>
+                                <td>${option.stock_name || ''}</td>
                                 <td><span class="stock-price">${stockPrice}</span></td>
                                 <td>${option.option_code || ''}</td>
                                 <td><span class="strike-price">${strikePrice}</span></td>
                                 <td><span class="expiry-date">${expiryDate}</span></td>
                                 <td><span class="badge ${optionType.badge}">${optionType.text}</span></td>
-                                <td><span class="badge ${tradeDirection.badge}">${tradeDirection.text}</span></td>
+
                                 <td>${option.price ? option.price.toFixed(2) : ''}</td>
                                 <td>${option.volume || ''}</td>
                                 <td>${option.turnover ? formatNumber(option.turnover) : ''}</td>

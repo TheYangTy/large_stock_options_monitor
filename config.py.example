@@ -23,13 +23,41 @@ MONITOR_STOCKS = [
     'HK.00981',  # 中芯国际
 ]
 
-# 期权大单筛选条件 - 降低阈值以获取更多大单
-OPTION_FILTER = {
+# 期权大单筛选条件（默认阈值 + 按股票覆盖）
+DEFAULT_OPTION_FILTER = {
     'min_volume': 10,        # 最小成交量 
     'min_turnover': 10000,   # 最小成交额 (港币) 
     'min_premium': 0.01,     # 最小权利金
-    'price_range': 0.15,      # 价格范围
+    'price_range': 0.15,     # 价格范围
 }
+
+# 每只股票的自定义过滤阈值（覆盖默认值，未配置的字段沿用默认）
+OPTION_FILTERS = {
+    # 示例：腾讯控股
+    'HK.00700': {
+        'min_volume': 20,
+        'min_turnover': 20000,
+    },
+    # 示例：阿里巴巴
+    'HK.09988': {
+        'min_volume': 15,
+        'min_turnover': 15000,
+    },
+    # 如需为更多股票设置，按上述格式添加
+}
+
+# 兼容旧版代码：仍提供 OPTION_FILTER 作为默认值引用
+OPTION_FILTER = DEFAULT_OPTION_FILTER
+
+# 工具函数：获取某只股票的最终过滤配置（默认+覆盖）
+def get_option_filter(stock_code: str):
+    try:
+        override = OPTION_FILTERS.get(stock_code, {})
+        cfg = DEFAULT_OPTION_FILTER.copy()
+        cfg.update(override)
+        return cfg
+    except Exception:
+        return DEFAULT_OPTION_FILTER
 
 # 监控时间设置
 MONITOR_TIME = {

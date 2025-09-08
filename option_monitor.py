@@ -758,7 +758,7 @@ class OptionMonitor:
                         self.logger.warning(f"Mac通知发送失败: {e}")
                 
                 # 发送企业微信通知
-                if NOTIFICATION.get('enable_wework_bot', False):
+                if NOTIFICATION.get('enable_wework_bot', True):
                     try:
                         self.notifier.send_big_options_summary(big_options)
                     except Exception as e:

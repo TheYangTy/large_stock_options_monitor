@@ -62,7 +62,7 @@ class Notifier:
             self._send_mac_notification(trade_info)
             
         # 企业微信通知
-        if NOTIFICATION.get('enable_wework_bot', False) and self.wework_notifier:
+        if NOTIFICATION.get('enable_wework_bot', True) and self.wework_notifier:
             self._send_wework_notification(trade_info)
     
     def _format_trade_message(self, trade_info: Dict[str, Any]) -> str:
@@ -171,7 +171,7 @@ class Notifier:
             
         except Exception as e:
             self.logger.error(f"发送Mac通知失败: {e}")
-    
+
     def _send_wework_notification(self, trade_info: Dict[str, Any]):
         """发送企业微信通知"""
         try:
@@ -214,9 +214,9 @@ class Notifier:
                 'trades': big_options,
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
-            
+
             # 发送企业微信汇总通知
-            if NOTIFICATION.get('enable_wework_bot', False) and self.wework_notifier:
+            if NOTIFICATION.get('enable_wework_bot', True) and self.wework_notifier:
                 self.wework_notifier.send_summary_report(summary_data)
                 self.logger.info(f"企业微信汇总通知已发送: {len(big_options)}笔交易")
                 

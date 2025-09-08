@@ -11,6 +11,10 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from utils.push_record_manager import PushRecordManager
+import hashlib
+import base64
+import hmac
+import time
 
 class WeWorkNotifier:
     """企微机器人通知器"""
@@ -39,20 +43,34 @@ class WeWorkNotifier:
         except Exception as e:
             self.logger.error(f"企微连接测试失败: {e}")
             return False
+
+    def gen_sign(self, timestamp, secret):
+        # 拼接timestamp和secret
+        string_to_sign = '{}\n{}'.format(timestamp, secret)
+        hmac_code = hmac.new(string_to_sign.encode("utf-8"), digestmod=hashlib.sha256).digest()
+        # 对结果进行base64处理
+        sign = base64.b64encode(hmac_code).decode('utf-8')
+        return sign
     
     def send_text_message(self, content: str) -> bool:
         """发送文本消息"""
         try:
+            url = "https://open.feishu.cn/open-apis/bot/v2/hook/16c13980-8281-4f09-aaae-9735d6f2ff05"
+            headers = {"Content-Type": "application/json"}
+            timestamp = int(time.time())
+            sign = self.gen_sign(timestamp, "0CcpnTBir1peWU1wGmC84b")
             data = {
-                "msgtype": "text",
-                "text": {
-                    "content": content,
-                    "mentioned_list": self.mentioned_list,
-                    "mentioned_mobile_list": self.mentioned_mobile_list
+                "msg_type": "text",
+                "timestamp": timestamp,
+                "sign": sign,
+                "content": {
+                    "text": content
                 }
             }
-            
-            response = requests.post(self.webhook_url, json=data, timeout=10)
+
+            response = requests.post(url, headers=headers, json=data)
+            print(response.status_code)
+            print(response.text)
             
             if response.status_code == 200:
                 result = response.json()
@@ -213,7 +231,7 @@ class WeWorkNotifier:
             # 将新交易标记为已推送
             option_ids = [trade.get('_id') for trade in new_trades if '_id' in trade]
             self.push_record_manager.mark_batch_as_pushed(option_ids)
-            
+
             return self.send_text_message(content)
             
         except Exception as e:

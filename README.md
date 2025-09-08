@@ -139,6 +139,28 @@ pip install -r requirements.txt
 - 企微机器人需要先申请并配置Webhook地址
 - 系统默认每5分钟刷新一次数据，可在配置中调整
 
+
+## 🤝 贡献 (Contributing)
+
+欢迎 PR / Issue / Discussion  
+
+
+## 💖 赞助 (Sponsor)
+
+新人第一次做开源，希望各位大佬赏个鸡腿🍗，谢谢！
+
+<details>
+<summary>展开查看微信 / 支付宝打赏二维码</summary>
+
+<p>
+  <img src="screenshots/wx.png" alt="微信赞赏码" width="230" />
+  <img src="screenshots/zfb.png" alt="支付宝收款码" width="230" />
+</p>
+
+</details>
+
+
+
 ## ⭐ Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=altenli/large_stock_options_monitor&type=Date)](https://star-history.com/#altenli/large_stock_options_monitor&Date)

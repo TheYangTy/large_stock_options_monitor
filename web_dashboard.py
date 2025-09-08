@@ -208,84 +208,59 @@ def get_big_options_summary():
         # 直接从缓存文件加载数据，不再调用Futu API
         summary = big_options_processor.load_current_summary()
 
-        # 也从 stock_prices.json 补齐名称，保持与摘要一致
+        # 从 data/stock_prices.json 读取股票名称和成交额信息
         stock_name_map = {}
+        stock_turnover_map = {}
+        prices = {}  # 定义prices变量，确保后续代码可以访问
         try:
             sp_path = os.path.join('data', 'stock_prices.json')
             if os.path.exists(sp_path):
                 with open(sp_path, 'r', encoding='utf-8') as f:
                     sp = json.load(f)
-                prices = sp.get('prices') if isinstance(sp, dict) else None
+                # 兼容结构: {"prices": {"HK.00700": {"price": 600, "name": "腾讯", "turnover": 1000000}}}
+                prices = sp.get('prices') if isinstance(sp, dict) else {}
                 if isinstance(prices, dict):
                     for code, info in prices.items():
                         if isinstance(info, dict):
+                            # 获取股票名称
                             name = info.get('name')
                             if name:
                                 stock_name_map[code] = name
-        except Exception as _e:
-            logger.warning(f"读取stock_prices.json失败: {_e}")
+                            
+                            # 获取股票成交额
+                            turnover = info.get('turnover')
+                            if turnover is not None:
+                                stock_turnover_map[code] = turnover
+                    
+                    logger.info(f"从stock_prices.json读取了{len(stock_name_map)}个股票名称和{len(stock_turnover_map)}个成交额数据")
+        except Exception as e:
+            logger.warning(f"读取stock_prices.json失败: {e}")
 
-        if summary and stock_name_map:
-            bos = summary.get('big_options', [])
-            if isinstance(bos, list):
-                for opt in bos:
-                    if isinstance(opt, dict):
-                        code = opt.get('stock_code')
-                        if code and not opt.get('stock_name'):
-                            nm = stock_name_map.get(code)
-                            if nm:
-                                opt['stock_name'] = nm
-
-        # 从 data/stock_prices.json 读取股票名称映射，补齐 big_options 的 stock_name
-        stock_name_map = {}
-        try:
-            sp_path = os.path.join('data', 'stock_prices.json')
-            if os.path.exists(sp_path):
-                with open(sp_path, 'r', encoding='utf-8') as f:
-                    sp = json.load(f)
-                # 兼容结构: {"prices": {"HK.00700": {"price": 600, "name": "腾讯"}}}
-                prices = sp.get('prices') if isinstance(sp, dict) else None
-                if isinstance(prices, dict):
-                    for code, info in prices.items():
-                        if isinstance(info, dict):
-                            name = info.get('name')
-                            if name:
-                                stock_name_map[code] = name
-        except Exception as _e:
-            logger.warning(f"读取stock_prices.json失败: {_e}")
-
+        # 补充股票名称和成交额到big_options
         big_options = summary.get('big_options', []) if summary else []
-        if isinstance(big_options, list) and stock_name_map:
+        if isinstance(big_options, list):
+            updated_name_count = 0
+            updated_turnover_count = 0
+            
             for opt in big_options:
                 if isinstance(opt, dict):
                     code = opt.get('stock_code')
-                    if code and not opt.get('stock_name'):
-                        nm = stock_name_map.get(code)
-                        if nm:
-                            opt['stock_name'] = nm
+                    if code:
+                        # 补充股票名称
+                        if not opt.get('stock_name') and code in stock_name_map:
+                            opt['stock_name'] = stock_name_map[code]
+                            updated_name_count += 1
+                        
+                        # 补充股票成交额 - 始终更新，确保使用最新数据
+                        if code in stock_turnover_map:
+                            opt['stock_turnover'] = stock_turnover_map[code]
+                            updated_turnover_count += 1
+            
+            if updated_name_count > 0 or updated_turnover_count > 0:
+                logger.info(f"已补充{updated_name_count}个股票名称和{updated_turnover_count}个成交额数据")
 
-        # 读取 stock_prices.json 中的成交额，补充到 big_options 的 stock_turnover 字段
-        try:
-            stock_turnover_map = {}
-            sp_path = os.path.join('data', 'stock_prices.json')
-            if os.path.exists(sp_path):
-                with open(sp_path, 'r', encoding='utf-8') as f:
-                    sp = json.load(f)
-                prices = sp.get('prices') if isinstance(sp, dict) else None
-                if isinstance(prices, dict):
-                    for code, info in prices.items():
-                        if isinstance(info, dict) and ('turnover' in info):
-                            stock_turnover_map[code] = info.get('turnover')
-            if isinstance(big_options, list) and stock_turnover_map:
-                for opt in big_options:
-                    if isinstance(opt, dict):
-                        code = opt.get('stock_code')
-                        if code and ('stock_turnover' not in opt):
-                            t = stock_turnover_map.get(code)
-                            if t is not None:
-                                opt['stock_turnover'] = t
-        except Exception as _e:
-            logger.warning(f"读取stock_prices成交额失败: {_e}")
+        # 确保所有期权都有正确的正股股价和成交额数据
+        logger.debug(f"确保所有期权都有正确的正股股价和成交额数据")
         
         logger.debug(f"从缓存加载汇总数据: {summary is not None}")
         if summary:
@@ -307,6 +282,9 @@ def get_big_options_summary():
         
         # 处理每个期权，确保所有必要字段都存在
         for option in big_options:
+            # 获取股票代码
+            stock_code = option.get('stock_code')
+            
             # 处理正股股价：如果stock_price是对象，提取price字段
             if 'stock_price' in option and isinstance(option['stock_price'], dict):
                 stock_price_info = option['stock_price']
@@ -317,6 +295,15 @@ def get_big_options_summary():
                 # 处理正股成交额：从stock_price对象中提取turnover
                 if 'turnover' in stock_price_info:
                     option['stock_turnover'] = stock_price_info.get('turnover')
+            
+            # 确保股票代码存在，并从stock_turnover_map中获取最新成交额
+            if stock_code and stock_code in stock_turnover_map:
+                option['stock_turnover'] = stock_turnover_map[stock_code]
+                
+            # 确保正股股价存在，如果不存在则从stock_prices.json中获取
+            if stock_code and ('stock_price' not in option or option['stock_price'] == 0):
+                if 'prices' in locals() and stock_code in prices and isinstance(prices[stock_code], dict) and 'price' in prices[stock_code]:
+                    option['stock_price'] = prices[stock_code]['price']
             
             # 确保期权类型字段存在
             if 'option_type' not in option or not option['option_type']:
@@ -534,184 +521,6 @@ def send_wework_test():
 def force_push():
     """已禁用：推送逻辑统一由 option_monitor.py 负责"""
     return jsonify({'status': 'error', 'message': '已禁用：请在 option_monitor.py 中进行推送'})
-    return jsonify({'status': 'error', 'message': '已禁用：请在 option_monitor.py 中进行推送'})
-    if not wework_notifier:
-        return jsonify({
-            'status': 'error',
-            'message': '企微通知器未初始化'
-        })
-    
-    try:
-        # 加载数据
-        summary = big_options_processor.load_current_summary()
-        if not summary:
-            return jsonify({
-                'status': 'error',
-                'message': '无法加载大单数据'
-            })
-        
-        # 解析数据
-        big_options = summary.get('big_options', [])
-        total_count = len(big_options)
-        statistics = summary.get('statistics', {})
-        total_turnover = statistics.get('total_turnover', 0)
-
-        # 从 data/stock_prices.json 补齐股票名称
-        try:
-            stock_name_map = {}
-            sp_path = os.path.join('data', 'stock_prices.json')
-            if os.path.exists(sp_path):
-                with open(sp_path, 'r', encoding='utf-8') as f:
-                    sp = json.load(f)
-                prices = sp.get('prices') if isinstance(sp, dict) else None
-                if isinstance(prices, dict):
-                    for code, info in prices.items():
-                        if isinstance(info, dict):
-                            nm = info.get('name')
-                            if nm:
-                                stock_name_map[code] = nm
-            if isinstance(big_options, list) and stock_name_map:
-                for opt in big_options:
-                    if isinstance(opt, dict):
-                        code = opt.get('stock_code')
-                        if code and not opt.get('stock_name'):
-                            nm = stock_name_map.get(code)
-                            if nm:
-                                opt['stock_name'] = nm
-        except Exception as _e:
-            logger.warning(f"force_push 补齐名称失败: {_e}")
-        
-        if total_count == 0:
-            return jsonify({
-                'status': 'warning',
-                'message': '没有大单数据可推送'
-            })
-        
-        # 构建消息
-        from datetime import datetime
-        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
-        # 强制推送时，可以选择是否只推送新增大单
-        force_all = request.args.get('force_all', 'false').lower() == 'true'
-        
-        if force_all:
-            # 推送所有大单，但仍然标记为已推送
-            for option in big_options:
-                option_id = push_record_manager.generate_option_id(option)
-                push_record_manager.mark_option_pushed(option_id)
-            
-            message = f"""📊 港股期权大单监控 (网页强制推送-全部)
-⏰ 时间: {current_time}
-📈 总交易: {total_count} 笔
-💰 总金额: {total_turnover:,.0f} 港币
-
-📋 大单明细:"""
-            
-            # 添加大单明细
-            for i, option in enumerate(big_options[:5]):
-                stock_code = option.get('stock_code', 'Unknown')
-                option_code = option.get('option_code', 'Unknown')
-                
-                # 解析期权类型
-                option_type = option.get('option_type', '未知')
-                if not option_type or option_type == '未知':
-                    if 'C' in option_code.upper():
-                        option_type = "Call (看涨期权)"
-                    elif 'P' in option_code.upper():
-                        option_type = "Put (看跌期权)"
-                
-                # 解析交易方向
-                direction = option.get('direction', '未知')
-                
-                volume = option.get('volume', 0)
-                turnover = option.get('turnover', 0)
-                
-                stock_name = option.get('stock_name', '')
-                stock_display = f"{stock_name}({stock_code})" if stock_name else stock_code
-                message += f"\n{i+1}. {stock_display} {option_code} {option_type} {volume}手 {turnover:,.0f}港币"
-            
-            if total_count > 5:
-                message += f"\n... 还有 {total_count - 5} 笔大单 (详见网页)"
-        else:
-            # 只推送新增大单
-            new_options = []
-            for option in big_options:
-                option_id = push_record_manager.generate_option_id(option)
-                if not push_record_manager.is_option_pushed(option_id):
-                    new_options.append(option)
-                    # 标记为已推送
-                    push_record_manager.mark_option_pushed(option_id)
-            
-            new_count = len(new_options)
-            if new_count == 0:
-                return jsonify({
-                    'status': 'warning',
-                    'message': '没有新增大单数据可推送，所有大单已经推送过'
-                })
-            
-            message = f"""📊 港股期权大单监控 (网页强制推送-新增)
-⏰ 时间: {current_time}
-📈 总交易: {total_count} 笔
-🆕 新增交易: {new_count} 笔
-💰 总金额: {total_turnover:,.0f} 港币
-
-📋 新增大单明细:"""
-            
-            # 添加新增大单明细
-            for i, option in enumerate(new_options[:5]):
-                stock_code = option.get('stock_code', 'Unknown')
-                option_code = option.get('option_code', 'Unknown')
-                
-                # 解析期权类型
-                option_type = option.get('option_type', '未知')
-                if not option_type or option_type == '未知':
-                    if 'C' in option_code.upper():
-                        option_type = "Call (看涨期权)"
-                    elif 'P' in option_code.upper():
-                        option_type = "Put (看跌期权)"
-                
-                # 解析交易方向
-                direction = option.get('direction', '未知')
-                
-                volume = option.get('volume', 0)
-                turnover = option.get('turnover', 0)
-                
-                stock_name = option.get('stock_name', '')
-                stock_display = f"{stock_name}({stock_code})" if stock_name else stock_code
-                message += f"\n{i+1}. {stock_display} {option_code} {option_type} {volume}手 {turnover:,.0f}港币"
-            
-            if new_count > 5:
-                message += f"\n... 还有 {new_count - 5} 笔新增大单 (详见网页)"
-        
-        # 发送消息
-        logger.info("已禁用：web_dashboard 不再直接发送企微通知")
-        success = False
-        
-        if success:
-            if force_all:
-                return jsonify({
-                    'status': 'success',
-                    'message': f'成功推送全部 {total_count} 笔大单数据到企微'
-                })
-            else:
-                return jsonify({
-                    'status': 'success',
-                    'message': f'成功推送 {len(new_options)} 笔新增大单数据到企微'
-                })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': '企微消息发送失败'
-            })
-            
-    except Exception as e:
-        import traceback
-        error_trace = traceback.format_exc()
-        return jsonify({
-            'status': 'error',
-            'message': f'推送异常: {str(e)}',
-            'trace': error_trace
-        })
 
 
 if __name__ == '__main__':

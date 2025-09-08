@@ -72,6 +72,10 @@
         .expiry-date {
             color: #6c757d;
         }
+        .turnover-ratio {
+            font-weight: bold;
+            color: #dc3545;
+        }
         /* 为不同类型的期权行添加左边框颜色 */
         tr.call-option {
             border-left: 4px solid #198754;
@@ -94,16 +98,12 @@
                         </div>
                     </div>
                     <div class="card-body">
-                        <!-- 筛选区：股票代码 / 股票名称 -->
+                        <!-- 筛选区：股票筛选 -->
                         <div id="filters" class="mb-3" style="padding:10px; border:1px solid #eee; border-radius:6px;">
                             <div class="row g-3">
-                                <div class="col-12 col-md-6">
-                                    <div class="fw-semibold mb-2">股票代码</div>
-                                    <div id="filter-codes" class="d-flex flex-wrap gap-3"></div>
-                                </div>
-                                <div class="col-12 col-md-6">
-                                    <div class="fw-semibold mb-2">股票名称</div>
-                                    <div id="filter-names" class="d-flex flex-wrap gap-3"></div>
+                                <div class="col-12">
+                                    <div class="fw-semibold mb-2">股票筛选</div>
+                                    <div id="filter-stocks" class="d-flex flex-wrap gap-3"></div>
                                 </div>
                             </div>
                             <div class="mt-2 d-flex gap-2 flex-wrap">
@@ -158,10 +158,10 @@
                                         <th>执行价格</th>
                                         <th>到期日</th>
                                         <th>期权类型</th>
-
                                         <th>期权价格</th>
                                         <th>成交量</th>
                                         <th>成交额</th>
+                                        <th>成交额占比(%)</th>
                                         <th>时间</th>
                                     </tr>
                                 </thead>
@@ -190,18 +190,14 @@
         let refreshTimer;
 
         // 筛选器状态
-        let selectedCodes = new Set();
-        let selectedNames = new Set();
+        let selectedStocks = new Set();
 
         // 应用筛选：根据已选的代码/名称过滤
         function applyFilters(arr) {
             try {
                 let data = Array.isArray(arr) ? arr : [];
-                if (selectedCodes.size > 0) {
-                    data = data.filter(o => o && selectedCodes.has(String(o.stock_code)));
-                }
-                if (selectedNames.size > 0) {
-                    data = data.filter(o => o && selectedNames.has(String(o.stock_name)));
+                if (selectedStocks.size > 0) {
+                    data = data.filter(o => o && (selectedStocks.has(String(o.stock_code)) || selectedStocks.has(String(o.stock_name))));
                 }
                 return data;
             } catch (e) {
@@ -222,28 +218,26 @@
                     }
                 });
 
-                const codesArr = Array.from(codes).sort();
-                const namesArr = Array.from(names).sort();
+                // 创建股票映射：代码 -> 名称
+                const stockMap = new Map();
+                bigOptions.forEach(option => {
+                    if (option.stock_code && option.stock_name) {
+                        stockMap.set(option.stock_code, option.stock_name);
+                    }
+                });
 
-                const codeBox = document.getElementById('filter-codes');
-                const nameBox = document.getElementById('filter-names');
-                if (!codeBox || !nameBox) return;
+                // 按股票代码排序
+                const stocksArr = Array.from(stockMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
 
-                codeBox.innerHTML = codesArr.map(code => {
-                    const id = 'code_' + code.replace(/[^a-zA-Z0-9_]/g, '_');
-                    const checked = selectedCodes.has(code) ? 'checked' : '';
+                const stockBox = document.getElementById('filter-stocks');
+                if (!stockBox) return;
+
+                stockBox.innerHTML = stocksArr.map(([code, name]) => {
+                    const id = 'stock_' + code.replace(/[^a-zA-Z0-9_]/g, '_');
+                    const checked = selectedStocks.has(code) || selectedStocks.has(name) ? 'checked' : '';
+                    const displayText = `${name} (${code})`;
                     return `<label for="${id}" class="form-check-label d-inline-flex align-items-center gap-1">
-                        <input class="form-check-input" type="checkbox" id="${id}" value="${code}" ${checked}/> ${code}
-                    </label>`;
-                }).join('');
-
-                const maxNames = 20;
-                const showNames = namesArr.slice(0, maxNames);
-                nameBox.innerHTML = showNames.map(name => {
-                    const id = 'name_' + name.replace(/[^a-zA-Z0-9_]/g, '_');
-                    const checked = selectedNames.has(name) ? 'checked' : '';
-                    return `<label for="${id}" class="form-check-label d-inline-flex align-items-center gap-1">
-                        <input class="form-check-input" type="checkbox" id="${id}" value="${name}" ${checked}/> ${name}
+                        <input class="form-check-input" type="checkbox" id="${id}" value="${code}" ${checked}/> ${displayText}
                     </label>`;
                 }).join('');
 
@@ -252,18 +246,15 @@
 
                 if (btnApply) {
                     btnApply.onclick = () => {
-                        selectedCodes = new Set(Array.from(codeBox.querySelectorAll('input[type="checkbox"]:checked')).map(i => i.value));
-                        selectedNames = new Set(Array.from(nameBox.querySelectorAll('input[type="checkbox"]:checked')).map(i => i.value));
+                        selectedStocks = new Set(Array.from(stockBox.querySelectorAll('input[type="checkbox"]:checked')).map(i => i.value));
                         // 重新加载一次以应用筛选（无需再次请求，可直接用当前数据渲染）
                         applyFiltersAndReRender();
                     };
                 }
                 if (btnClear) {
                     btnClear.onclick = () => {
-                        selectedCodes.clear();
-                        selectedNames.clear();
-                        codeBox.querySelectorAll('input[type="checkbox"]').forEach(i => i.checked = false);
-                        nameBox.querySelectorAll('input[type="checkbox"]').forEach(i => i.checked = false);
+                        selectedStocks.clear();
+                        stockBox.querySelectorAll('input[type="checkbox"]').forEach(i => i.checked = false);
                         applyFiltersAndReRender();
                     };
                 }
@@ -461,6 +452,13 @@
                             const stockTurnover = (typeof option.stock_turnover === 'number') ? 
                                 (option.stock_turnover / 10000).toFixed(1) : '';
                             
+                            // 计算成交额占比
+                            let turnoverRatio = '';
+                            if (option.turnover && option.stock_turnover && option.stock_turnover > 0) {
+                                const ratio = (option.turnover / option.stock_turnover) * 100;
+                                turnoverRatio = ratio.toFixed(4) + '%';
+                            }
+                            
                             // 格式化时间
                             const timestamp = option.timestamp ? 
                                 new Date(option.timestamp).toLocaleString('zh-CN', { 
@@ -482,10 +480,10 @@
                                 <td><span class="strike-price">${strikePrice}</span></td>
                                 <td><span class="expiry-date">${expiryDate}</span></td>
                                 <td><span class="badge ${optionType.badge}">${optionType.text}</span></td>
-
                                 <td>${option.price ? option.price.toFixed(2) : ''}</td>
                                 <td>${option.volume || ''}</td>
                                 <td>${option.turnover ? formatNumber(option.turnover) : ''}</td>
+                                <td><span class="turnover-ratio">${turnoverRatio}</span></td>
                                 <td>${timestamp}</td>
                             `;
                             
@@ -493,7 +491,7 @@
                         });
                     } else {
                         const row = document.createElement('tr');
-                        row.innerHTML = '<td colspan="11" class="text-center text-muted">暂无大单期权数据</td>';
+                        row.innerHTML = '<td colspan="13" class="text-center text-muted">暂无大单期权数据</td>';
                         tableBody.appendChild(row);
                     }
                 })

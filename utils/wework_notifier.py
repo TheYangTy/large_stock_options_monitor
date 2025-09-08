@@ -15,6 +15,10 @@ import hashlib
 import base64
 import hmac
 import time
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import get_option_filter
 
 class WeWorkNotifier:
     """企微机器人通知器"""
@@ -163,9 +167,23 @@ class WeWorkNotifier:
 💰 总金额: {total_amount:,.0f} 港币"""
                 return self.send_text_message(content)
             
-            # 按股票分组 (只统计新增的)
-            stock_summary = {}
+            # 过滤出符合min_volume要求的新增交易
+            filtered_new_trades = []
             for trade in new_trades:
+                stock_code = trade.get('stock_code', 'Unknown')
+                volume_diff = trade.get('volume_diff', 0)
+                
+                # 获取该股票的配置
+                option_filter = get_option_filter(stock_code)
+                min_volume = option_filter.get('min_volume', 10)
+                
+                # 只有增加的交易量>=min_volume才加入通知
+                if volume_diff >= min_volume:
+                    filtered_new_trades.append(trade)
+            
+            # 按股票分组 (只统计符合条件的新增交易)
+            stock_summary = {}
+            for trade in filtered_new_trades:
                 stock_code = trade.get('stock_code', 'Unknown')
                 stock_name = trade.get('stock_name', 'Unknown')
                 if stock_code not in stock_summary:
@@ -179,10 +197,26 @@ class WeWorkNotifier:
                 stock_summary[stock_code]['amount'] += trade.get('turnover', 0)
                 stock_summary[stock_code]['trades'].append(trade)
             
+            # 更新统计数据（基于过滤后的交易）
+            filtered_trades_count = len(filtered_new_trades)
+            filtered_amount = sum(trade.get('turnover', 0) for trade in filtered_new_trades)
+            
+            # 如果过滤后没有符合条件的交易，发送简短汇总
+            if not filtered_new_trades:
+                content = f"""📊 期权监控汇总报告
+⏰ 时间: {timestamp}
+📈 总交易: {total_trades} 笔 (新增: {new_trades_count} 笔，符合通知条件: 0 笔)
+💰 总金额: {total_amount:,.0f} 港币 (新增: {new_amount:,.0f} 港币)
+📝 说明: 新增交易量未达到通知阈值"""
+                # 仍然标记所有新交易为已推送（更新缓存）
+                option_ids = [trade.get('_id') for trade in new_trades if '_id' in trade]
+                self.push_record_manager.mark_batch_as_pushed(option_ids)
+                return self.send_text_message(content)
+            
             content = f"""📊 期权监控汇总报告
 ⏰ 时间: {timestamp}
-📈 总交易: {total_trades} 笔 (新增: {new_trades_count} 笔)
-💰 总金额: {total_amount:,.0f} 港币 (新增: {new_amount:,.0f} 港币)
+📈 总交易: {total_trades} 笔 (新增: {new_trades_count} 笔，符合通知条件: {filtered_trades_count} 笔)
+💰 总金额: {total_amount:,.0f} 港币 (新增: {new_amount:,.0f} 港币，符合条件: {filtered_amount:,.0f} 港币)
 
 📋 新增大单统计:"""
             

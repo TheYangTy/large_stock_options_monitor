@@ -704,30 +704,63 @@ class BigOptionsProcessor:
                         else:
                             # 使用默认价格（兜底）
                             self.logger.debug(f"未找到{stock_code}的缓存，使用默认价格")
+                            # 股票名称映射
+                            stock_names = {
+                                'HK.00700': '腾讯控股',
+                                'HK.09988': '阿里巴巴-SW',
+                                'HK.03690': '美团-W',
+                                'HK.01810': '小米集团-W',
+                                'HK.09618': '京东集团-SW',
+                                'HK.02318': '中国平安',
+                                'HK.00388': '香港交易所',
+                                'HK.00981': '中芯国际',
+                                'HK.09888': '百度集团-SW',
+                                'HK.00005': '汇丰控股',
+                                'HK.00939': '建设银行',
+                                'HK.01299': '友邦保险',
+                                'HK.02020': '安踏体育',
+                                'HK.01024': '快手-W',
+                                'HK.02269': '药明生物',
+                                'HK.00175': '吉利汽车',
+                                'HK.01211': '比亚迪股份',
+                                'HK.02015': '理想汽车-W',
+                                'HK.09868': '小鹏汽车-W',
+                                'HK.09866': '蔚来-SW',
+                            }
+                            
+                            stock_name = stock_names.get(stock_code, stock_code)
+                            
+                            # 默认价格映射
                             if stock_code == 'HK.00700':  # 腾讯
                                 current_stock_price = 600.0
-                                stock_name = "腾讯控股"
                             elif stock_code == 'HK.09988':  # 阿里巴巴
                                 current_stock_price = 130.0
-                                stock_name = "阿里巴巴-SW"
                             elif stock_code == 'HK.03690':  # 美团
                                 current_stock_price = 120.0
-                                stock_name = "美团-W"
                             elif stock_code == 'HK.01810':  # 小米
                                 current_stock_price = 15.0
-                                stock_name = "小米集团-W"
                             elif stock_code == 'HK.09618':  # 京东
                                 current_stock_price = 120.0
-                                stock_name = "京东集团-SW"
                             elif stock_code == 'HK.02318':  # 中国平安
                                 current_stock_price = 40.0
-                                stock_name = "中国平安"
                             elif stock_code == 'HK.00388':  # 港交所
                                 current_stock_price = 300.0
-                                stock_name = "香港交易所"
+                            elif stock_code == 'HK.00981':  # 中芯国际
+                                current_stock_price = 60.0
+                            elif stock_code == 'HK.09888':  # 百度
+                                current_stock_price = 100.0
+                            elif stock_code == 'HK.00005':  # 汇丰控股
+                                current_stock_price = 60.0
+                            elif stock_code == 'HK.01299':  # 友邦保险
+                                current_stock_price = 70.0
+                            elif stock_code == 'HK.01024':  # 快手
+                                current_stock_price = 50.0
+                            elif stock_code == 'HK.01211':  # 比亚迪
+                                current_stock_price = 250.0
+                            elif stock_code == 'HK.02015':  # 理想汽车
+                                current_stock_price = 100.0
                             else:
                                 current_stock_price = 100.0
-                                stock_name = stock_code
                     except Exception as stock_e:
                         self.logger.debug(f"获取{stock_code}股价用于对比失败: {stock_e}")
             except Exception as e:

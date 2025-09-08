@@ -72,6 +72,10 @@
         .expiry-date {
             color: #6c757d;
         }
+        .turnover-ratio {
+            font-weight: bold;
+            color: #dc3545;
+        }
         /* 为不同类型的期权行添加左边框颜色 */
         tr.call-option {
             border-left: 4px solid #198754;
@@ -158,10 +162,10 @@
                                         <th>执行价格</th>
                                         <th>到期日</th>
                                         <th>期权类型</th>
-
                                         <th>期权价格</th>
                                         <th>成交量</th>
                                         <th>成交额</th>
+                                        <th>成交额占比(%)</th>
                                         <th>时间</th>
                                     </tr>
                                 </thead>
@@ -461,6 +465,13 @@
                             const stockTurnover = (typeof option.stock_turnover === 'number') ? 
                                 (option.stock_turnover / 10000).toFixed(1) : '';
                             
+                            // 计算成交额占比
+                            let turnoverRatio = '';
+                            if (option.turnover && option.stock_turnover && option.stock_turnover > 0) {
+                                const ratio = (option.turnover / option.stock_turnover) * 100;
+                                turnoverRatio = ratio.toFixed(4) + '%';
+                            }
+                            
                             // 格式化时间
                             const timestamp = option.timestamp ? 
                                 new Date(option.timestamp).toLocaleString('zh-CN', { 
@@ -482,10 +493,10 @@
                                 <td><span class="strike-price">${strikePrice}</span></td>
                                 <td><span class="expiry-date">${expiryDate}</span></td>
                                 <td><span class="badge ${optionType.badge}">${optionType.text}</span></td>
-
                                 <td>${option.price ? option.price.toFixed(2) : ''}</td>
                                 <td>${option.volume || ''}</td>
                                 <td>${option.turnover ? formatNumber(option.turnover) : ''}</td>
+                                <td><span class="turnover-ratio">${turnoverRatio}</span></td>
                                 <td>${timestamp}</td>
                             `;
                             
@@ -493,7 +504,7 @@
                         });
                     } else {
                         const row = document.createElement('tr');
-                        row.innerHTML = '<td colspan="11" class="text-center text-muted">暂无大单期权数据</td>';
+                        row.innerHTML = '<td colspan="13" class="text-center text-muted">暂无大单期权数据</td>';
                         tableBody.appendChild(row);
                     }
                 })

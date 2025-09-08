@@ -439,6 +439,31 @@ def get_big_options_summary():
         # 更新数据哈希值
         last_data_hash = current_data_hash
         
+        # 对数据进行排序：首先按股票分组，然后在相同股票内按成交额排序
+        if isinstance(big_options, list) and big_options:
+            # 定义股票顺序映射（可以根据需要调整顺序）
+            stock_order = {
+                'HK.00700': 1,  # 腾讯控股
+                'HK.09988': 2,  # 阿里巴巴
+                'HK.03690': 3,  # 美团
+                'HK.01810': 4,  # 小米集团
+                'HK.09618': 5,  # 京东集团
+                'HK.02318': 6,  # 中国平安
+                'HK.00388': 7,  # 香港交易所
+                'HK.00981': 8,  # 中芯国际
+            }
+            
+            def sort_key(option):
+                stock_code = option.get('stock_code', '')
+                turnover = option.get('turnover', 0)
+                # 获取股票排序权重，未知股票排在最后
+                stock_weight = stock_order.get(stock_code, 999)
+                # 返回排序键：(股票权重, -成交额) 负号表示成交额降序
+                return (stock_weight, -turnover)
+            
+            big_options.sort(key=sort_key)
+            logger.debug(f"已对 {len(big_options)} 笔交易进行排序：按股票分组，相同股票内按成交额降序")
+        
         # 确保数据格式正确
         result = {
             'total_count': len(big_options) if isinstance(big_options, list) else summary.get('total_count', 0),

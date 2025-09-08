@@ -307,6 +307,17 @@ def get_big_options_summary():
         
         # 处理每个期权，确保所有必要字段都存在
         for option in big_options:
+            # 处理正股股价：如果stock_price是对象，提取price字段
+            if 'stock_price' in option and isinstance(option['stock_price'], dict):
+                stock_price_info = option['stock_price']
+                option['stock_price'] = stock_price_info.get('price', 0)
+                # 如果没有stock_name，从stock_price对象中获取
+                if not option.get('stock_name') and stock_price_info.get('name'):
+                    option['stock_name'] = stock_price_info.get('name')
+                # 处理正股成交额：从stock_price对象中提取turnover
+                if 'turnover' in stock_price_info:
+                    option['stock_turnover'] = stock_price_info.get('turnover')
+            
             # 确保期权类型字段存在
             if 'option_type' not in option or not option['option_type']:
                 option_code = option.get('option_code', '')

@@ -794,7 +794,12 @@ class OptionMonitor:
                 stock_groups[stock_code] = []
             stock_groups[stock_code].append(opt)
         
-        for stock_code, options in stock_groups.items():
+        # 按成交额排序股票
+        sorted_stocks = sorted(stock_groups.items(), 
+                              key=lambda x: sum(opt.get('turnover', 0) for opt in x[1]), 
+                              reverse=True)
+        
+        for stock_code, options in sorted_stocks:
             stock_turnover = sum(opt.get('turnover', 0) for opt in options)
             # 获取股票名称（优先从期权数据，其次从缓存补齐）
             stock_name = options[0].get('stock_name', '') if options else ''
@@ -803,7 +808,7 @@ class OptionMonitor:
                 if isinstance(cached, dict):
                     stock_name = cached.get('name', '') or stock_name
             stock_display = f"{stock_code} {stock_name}" if stock_name else stock_code
-            print(f"\n📈 {stock_display}: {len(options)}笔, {stock_turnover/10000:.1f}万港币")
+            print(f"\n📈 {stock_display}: {len(options)}笔 {stock_turnover/10000:.1f}万港币")
             
             # 显示前3笔最大的交易
             top_options = sorted(options, key=lambda x: x.get('turnover', 0), reverse=True)[:3]
@@ -815,8 +820,11 @@ class OptionMonitor:
                         show_time = opt['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
                     except Exception:
                         show_time = ''
-                time_suffix = f", 成交时间: {show_time}" if show_time else ""
+                time_suffix = f" 成交时间: {show_time}" if show_time else ""
 
+                # 解析期权类型
+                option_type = self._parse_option_type(opt.get('option_code', ''))
+                
                 # 添加买卖方向显示
                 direction = opt.get('direction', 'Unknown')
                 direction_text = ""
@@ -829,15 +837,38 @@ class OptionMonitor:
                 
                 direction_display = f", {direction_text}" if direction_text else ""
                 
+                # 添加变化量信息
+                volume_diff = opt.get('volume_diff', 0)
+                if volume_diff > 0:
+                    diff_text = f", +{volume_diff}手"
+                elif volume_diff < 0:
+                    diff_text = f", {volume_diff}手"
+                else:
+                    diff_text = ""
+                
+                price = opt.get('price', opt.get('last_price', 0))
+                volume = opt.get('volume', 0)
+                turnover = opt.get('turnover', 0)
+                
                 print(
-                    f"   {i}. {opt.get('option_code', 'N/A')}: "
-                    f"{opt.get('volume', 0):,}手, "
-                    f"{opt.get('turnover', 0)/10000:.1f}万港币, "
-                    f"价: {opt.get('price', opt.get('last_price', 0)):.4f}"
-                    f"{direction_display}{time_suffix}"
+                    f"   {i}. {opt.get('option_code', 'N/A')}: {option_type}{direction_display}, "
+                    f"{price:.3f}×{volume}手{diff_text}, {turnover/10000:.1f}万{time_suffix}"
                 )
         
         print("="*60 + "\n")
+    
+    def _parse_option_type(self, option_code: str) -> str:
+        """解析期权类型 (Call/Put)"""
+        if not option_code:
+            return "Unknown"
+        
+        option_code_upper = option_code.upper()
+        if 'C' in option_code_upper:
+            return "Call (看涨)"
+        elif 'P' in option_code_upper:
+            return "Put (看跌)"
+        else:
+            return "Unknown"
     
     def start_monitoring(self):
         """启动监控"""

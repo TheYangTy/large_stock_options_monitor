@@ -783,12 +783,28 @@ class OptionMonitor:
         print(f"🚨 港股期权大单汇总 ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})")
         print("="*60)
         
-        total_turnover = sum(opt.get('turnover', 0) for opt in big_options)
-        print(f"📊 总计: {len(big_options)} 笔大单，总金额: {total_turnover/10000:.1f}万港币")
-        
-        # 按股票分组显示
-        stock_groups = {}
+        # 过滤出符合min_volume要求的交易
+        filtered_options = []
         for opt in big_options:
+            stock_code = opt.get('stock_code', 'Unknown')
+            volume_diff = opt.get('volume_diff', 0)
+            
+            # 获取该股票的配置
+            option_filter = get_option_filter(stock_code)
+            min_volume = option_filter.get('min_volume', 10)
+            
+            # 只有增加的交易量>=min_volume才显示
+            if volume_diff >= min_volume:
+                filtered_options.append(opt)
+        
+        total_turnover = sum(opt.get('turnover', 0) for opt in big_options)
+        filtered_turnover = sum(opt.get('turnover', 0) for opt in filtered_options)
+        print(f"📊 总计: {len(big_options)} 笔大单，总金额: {total_turnover/10000:.1f}万港币")
+        print(f"📋 符合通知条件: {len(filtered_options)} 笔，金额: {filtered_turnover/10000:.1f}万港币")
+        
+        # 按股票分组显示（使用过滤后的期权）
+        stock_groups = {}
+        for opt in filtered_options:
             stock_code = opt.get('stock_code', 'Unknown')
             if stock_code not in stock_groups:
                 stock_groups[stock_code] = []
@@ -807,7 +823,7 @@ class OptionMonitor:
                 cached = self.stock_price_cache.get(stock_code)
                 if isinstance(cached, dict):
                     stock_name = cached.get('name', '') or stock_name
-            stock_display = f"{stock_code} {stock_name}" if stock_name else stock_code
+            stock_display = f"{stock_name} ({stock_code})" if stock_name else stock_code
             print(f"\n📈 {stock_display}: {len(options)}笔 {stock_turnover/10000:.1f}万港币")
             
             # 显示前3笔最大的交易

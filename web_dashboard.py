@@ -375,67 +375,6 @@ def get_big_options_summary():
             big_options = [o for o in big_options if isinstance(o, dict) and _match(o)]
             logger.info(f"筛选: code='{code_filter}', name='{name_filter}' => {len(big_options)}/{before}")
         
-        # 强制发送大单数据到企微
-        # 推送逻辑已迁移到 option_monitor.py，此处禁用
-        if False:
-            try:
-                # 发送汇总通知
-                total_count = summary.get('total_count', 0)
-                
-                # 获取统计数据
-                statistics = summary.get('statistics', {})
-                total_turnover = statistics.get('total_turnover', 0)
-                
-                # 直接从big_options获取数据
-                if total_count > 0 and big_options:
-                    # 使用当前时间
-                    from datetime import datetime
-                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    
-                    # 过滤出新增的大单期权
-                    new_options = []
-                    for option in big_options:
-                        option_id = push_record_manager.generate_option_id(option)
-                        if not push_record_manager.is_option_pushed(option_id):
-                            new_options.append(option)
-                            # 标记为已推送
-                            push_record_manager.mark_option_pushed(option_id)
-                    
-                    # 如果有新增大单，则推送
-                    new_count = len(new_options)
-                    if new_count > 0:
-                        message = f"""📊 港股期权大单监控
-⏰ 时间: {current_time}
-📈 总交易: {total_count} 笔
-🆕 新增交易: {new_count} 笔
-💰 总金额: {total_turnover:,.0f} 港币
-
-📋 新增大单明细:"""
-                        
-                        # 添加最多5条新增大单明细
-                        for i, option in enumerate(new_options[:5]):
-                            stock_code = option.get('stock_code', 'Unknown')
-                            stock_name = option.get('stock_name', '')
-                            stock_display = f"{stock_name}({stock_code})" if stock_name else stock_code
-                            option_code = option.get('option_code', 'Unknown')
-                            option_type = option.get('option_type', '未知')
-                            direction = option.get('direction', '未知')
-                            volume = option.get('volume', 0)
-                            turnover = option.get('turnover', 0)
-                            
-                            message += f"\n{i+1}. {stock_display} {option_code} {option_type} {volume}手 {turnover:,.0f}港币"
-                        
-                        if new_count > 5:
-                            message += f"\n... 还有 {new_count - 5} 笔新增大单 (详见网页)"
-                        
-                        # 推送逻辑已迁移到 option_monitor.py，此处禁用发送
-                        logger.info("已禁用：推送由 option_monitor.py 负责，此处不再发送企微通知")
-                    else:
-                        logger.info("没有新增大单，跳过推送")
-            except Exception as e:
-                logger.error(f"❌ 发送企微通知失败: {e}")
-                logger.error(traceback.format_exc())
-        
         # 更新数据哈希值
         last_data_hash = current_data_hash
         

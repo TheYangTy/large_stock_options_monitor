@@ -1,6 +1,6 @@
-# 港股期权大单监控
+# 港股期权大单监控系统
 
-简洁高效的港股期权大单监控与Web面板展示，支持自动订阅、缓存合并、企业微信通知与可视化筛选。
+基于Futu OpenD的港股期权大单监控系统，支持企微机器人推送、交易量变化检测和股票名称显示。
 
 ## 最近更新
 
@@ -21,56 +21,165 @@
 - 成交额缺失补齐
   - 接口端先从缓存补齐，若缺失则调用行情补齐；仍缺时 sleep 10s 后再次读取缓存回填（本次请求可能多等待约10秒）
 
-## 快速开始
+## 🚀 功能特点
 
-1) 安装依赖
-- 需要本地 Futu OpenD 正常运行
-- Python 依赖（示例）：futu-api、pandas、flask 等
+- **实时监控**：监控指定港股的期权大单交易
+- **智能分析**：自动识别期权类型(Call/Put)和交易方向(买入/卖出)
+- **交易量变化检测**：只通知交易量发生变化的大单，避免重复通知
+- **股票名称显示**：在所有通知和汇总中显示股票名称，更加直观
+- **多渠道通知**：
+  - 企微机器人推送
+  - Mac系统通知
+  - Web界面实时查看
+- **数据汇总**：自动生成交易汇总报告
+- **定时刷新**：每5分钟自动刷新一次数据
+- **股价缓存机制**：优化API调用，提高性能
 
-2) 配置
-- 复制 config.py.example 为 config.py，并按需填写：
-  - FUTU_CONFIG.host/port
-  - MONITOR_STOCKS（监控的股票列表）
-  - WEB_CONFIG（端口等）
-  - NOTIFICATION（按需开启企微机器人等）
+## 📋 安装依赖
 
-3) 启动监控
-- python option_monitor.py
-- 程序会自动订阅 MONITOR_STOCKS 的 QUOTE+SNAPSHOT，并每分钟执行一次完整大单汇总
+```bash
+# 用conda创建虚拟环境
+conda create -n stock_options_env python=3.11
+# 激活conda
+conda activate stock_options_env
+# 安装依赖
+pip install -r requirements.txt
+```
 
-4) 启动Web面板
-- python web_dashboard.py
-- 浏览器访问 http://localhost:<WEB_CONFIG.port>
-- /api/status 可查看当前订阅覆盖情况（missing_subscriptions 应为空）
+## ⚙️ 配置说明
 
-## 接口概览
+所有配置都在`config.py`文件中：(从config.py.example改为config.py使用)
 
-- GET /api/big_options_summary
-  - 返回当前大单期权汇总（按后端顺序已排序）
-  - 若存在成交额缺失，会尝试行情补齐并在必要时延迟10秒重试缓存回填
-- GET /api/status
-  - 返回运行状态、monitored_stocks、subscribed_stocks、missing_subscriptions 等
-- GET /api/refresh_big_options
-  - 强制从缓存文件刷新一次汇总并更新时间戳
+- `FUTU_CONFIG`: Futu OpenD连接配置
+- `MONITOR_STOCKS`: 监控的港股列表
+- `OPTION_FILTER`: 期权大单筛选条件
+  - `min_volume`: 最小成交量（手）
+  - `min_turnover`: 最小成交额（港币）
+  - `min_premium`: 最小权利金
+  - `price_range`: 价格范围
+  - `show_all_big_options`: 是否显示所有符合条件的大单（即使交易量没有变化）
+- `MONITOR_TIME`: 监控时间设置
+  - `interval`: 监控间隔（秒）
+  - `lookback_days`: 回看天数
+- `NOTIFICATION`: 通知设置（包含企微机器人配置）
+- `LOG_CONFIG`: 日志配置
+- `DATA_CONFIG`: 数据存储配置
+- `WEB_CONFIG`: Web面板配置
+- `EARNINGS_CONFIG`: 财报监控配置
 
-## 数据文件
+## 🔧 企微机器人配置
 
-- data/current_big_option.json：大单汇总缓存
-- data/stock_prices.json：正股价格/成交额/成交量等缓存
-- data/stock_base_info.json：股票名称等基础信息（仅非空合并）
-- data/option_chains.json：期权链缓存（带节流写盘）
+在`config.py`中配置企微机器人：
 
-## 常见问题
+```python
+'wework_config': {
+    'webhook_url': 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxxxx',  # 企微机器人webhook地址
+    'mentioned_list': [],  # @的用户列表，如 ['@all'] 或 ['userid1', 'userid2']
+    'mentioned_mobile_list': [],  # @的手机号列表
+}
+```
 
-- 名称丢失
-  - 基础信息采用“仅非空覆盖”策略，API 返回空不会覆盖名称
-- 成交额/成交量为空
-  - Web 接口端会尝试行情补齐；仍缺时延迟10秒再次读取缓存回填
-- 排序看起来乱
-  - 已加入固定股票顺序与稳定键（股票代码）；组内按 volume 再 turnover 降序
+详细申请步骤请参考 `WEWORK_SETUP.md`。
 
-## 注意事项
+## 📱 使用方法
 
-- 不要手动清空 data/stock_base_info.json 与 data/stock_prices.json 的字段键名
-- OpenD 需保持连接可用；若断开，程序会尝试重连或回退到缓存价格
-- 启用企微推送需在 config.py 中正确配置 NOTIFICATION.wework_config
+1. 启动Futu OpenD
+   ```bash
+   # 确保Futu OpenD已正确安装并运行
+   # 默认连接地址: 127.0.0.1:11111
+   ```
+
+2. 运行期权监控程序
+   ```bash
+   python option_monitor.py
+   ```
+
+
+
+3. 启动Web界面（可选）
+   ```bash
+   python web_dashboard.py
+   ```
+
+4. 使用单次运行模式（测试用）
+   ```bash
+   python option_monitor.py --once
+   ```
+
+## 📸 运行时截图
+
+### 控制台输出
+![启动option_monitor](screenshots/console_output2.png)
+
+![启动Web界面](screenshots/console_output.png)
+
+### Web界面
+![Web界面](screenshots/web_dashboard.png)
+
+### 企微机器人通知
+![企微机器人通知](screenshots/wework_notification.png)
+
+
+## 🌐 Web界面功能
+
+- 实时显示大单期权数据
+- 自动刷新（可配置刷新间隔）
+- 显示期权类型(Call/Put)和交易方向(买入/卖出)
+- 显示股票名称和代码
+- 显示交易量变化情况
+- 首次加载和数据更新时自动推送到企微机器人
+- 提供企微机器人测试按钮
+
+## 💾 数据存储
+
+- 大单期权汇总: `data/current_big_option.json`
+- 历史交易记录: `data/option_trades.csv`
+- 日志文件: `logs/option_monitor.log`
+- 推送记录缓存: 用于避免重复推送相同的大单
+
+## 🔄 交易量变化检测
+
+系统会记录每个期权的交易量，并在下次检测时比较变化：
+- 🔥 标记表示交易量有变化的新大单
+- ⚪ 标记表示符合大单条件但交易量没有变化的期权
+- 可通过配置 `show_all_big_options` 选项控制是否显示所有符合条件的大单
+
+## 📊 股价信息显示
+
+- 系统会获取并显示股票名称，使通知更加直观
+- 使用 `get_market_snapshot` API 获取股票名称和价格
+- 实现了股价缓存机制，减少API调用次数
+
+## ⚠️ 注意事项
+
+- 确保Futu OpenD已正确配置并启动
+- 交易时段内运行以获取实时数据
+- 可根据需要调整筛选条件
+- 企微机器人需要先申请并配置Webhook地址
+- 系统默认每5分钟刷新一次数据，可在配置中调整
+
+
+## 🤝 贡献 (Contributing)
+
+欢迎 PR / Issue / Discussion  
+
+
+## 💖 赞助 (Sponsor)
+
+新人第一次做开源，希望各位大佬赏个鸡腿🍗，谢谢！
+
+<details>
+<summary>展开查看微信 / 支付宝打赏二维码</summary>
+
+<p>
+  <img src="screenshots/wx.png" alt="微信赞赏码" width="230" />
+  <img src="screenshots/zfb.png" alt="支付宝收款码" width="230" />
+</p>
+
+</details>
+
+
+
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=altenli/large_stock_options_monitor&type=Date)](https://star-history.com/#altenli/large_stock_options_monitor&Date)

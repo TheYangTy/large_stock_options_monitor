@@ -124,21 +124,6 @@ def get_stock_price(stock_code, force_refresh=False):
         logger.error(f"股价获取处理异常: {e}")
         return 0
 
-if wework_available and NOTIFICATION.get('enable_wework_bot', False):
-    try:
-        wework_config = NOTIFICATION.get('wework_config', {})
-        webhook_url = wework_config.get('webhook_url', '')
-        if webhook_url:
-            wework_notifier = WeWorkNotifier(
-                webhook_url=webhook_url,
-                mentioned_list=wework_config.get('mentioned_list', []),
-                mentioned_mobile_list=wework_config.get('mentioned_mobile_list', [])
-            )
-            logger.info("企微通知器初始化成功")
-    except Exception as e:
-        logger.error(f"企微通知器初始化失败: {e}")
-
-
 @app.route('/')
 def dashboard():
     """主面板"""
@@ -649,11 +634,6 @@ if __name__ == '__main__':
     logger.info(f"🌐 启动Web监控面板 (增强版)")
     logger.info(f"📍 访问地址: http://localhost:{WEB_CONFIG['port']}")
     logger.info(f"🔧 如需修改端口，请编辑 config.py 中的 WEB_CONFIG")
-    
-    if wework_notifier:
-        logger.info(f"🤖 企微机器人: 已启用")
-    else:
-        logger.info(f"🤖 企微机器人: 未启用")
     
     app.run(
         debug=WEB_CONFIG['debug'],

@@ -296,10 +296,10 @@ class OptionMonitor:
             for i in range(0, len(new_stocks), batch_size):
                 batch_codes = new_stocks[i:i+batch_size]
                 
-                # 订阅股票报价
-                ret, data = self.quote_ctx.subscribe(batch_codes, [ft.SubType.QUOTE])
+                # 订阅股票报价与快照
+                ret, data = self.quote_ctx.subscribe(batch_codes, [ft.SubType.QUOTE, ft.SubType.SNAPSHOT])
                 if ret == ft.RET_OK:
-                    self.logger.info(f"成功订阅 {len(batch_codes)} 只股票的报价")
+                    self.logger.info(f"成功订阅 {len(batch_codes)} 只股票的报价+快照")
                     # 更新已订阅列表
                     self.subscribed_stocks.update(batch_codes)
                 else:
@@ -307,6 +307,35 @@ class OptionMonitor:
                 
                 # 避免API调用过于频繁
                 time.sleep(0.5)
+            
+            # 订阅完成后校验覆盖情况（若有缺失，尝试再补订一次）
+            try:
+                missing = [c for c in MONITOR_STOCKS if c not in self.subscribed_stocks]
+                if missing:
+                    self.logger.warning(f"以下股票尚未订阅，尝试补订一次: {missing}")
+                    try:
+                        batch_size2 = 50
+                        for i2 in range(0, len(missing), batch_size2):
+                            batch_codes2 = missing[i2:i2+batch_size2]
+                            ret2, data2 = self.quote_ctx.subscribe(batch_codes2, [ft.SubType.QUOTE, ft.SubType.SNAPSHOT])
+                            if ret2 == ft.RET_OK:
+                                self.subscribed_stocks.update(batch_codes2)
+                                self.logger.info(f"补订成功 {len(batch_codes2)} 只股票")
+                            else:
+                                self.logger.warning(f"补订失败: {data2}")
+                            time.sleep(0.2)
+                        # 复核
+                        missing2 = [c for c in MONITOR_STOCKS if c not in self.subscribed_stocks]
+                        if missing2:
+                            self.logger.warning(f"仍有未订阅股票(等待下一轮重试): {missing2}")
+                        else:
+                            self.logger.info("所有config中配置的股票已成功订阅(含补订)")
+                    except Exception as _se:
+                        self.logger.warning(f"补订过程中异常: {_se}")
+                else:
+                    self.logger.info("所有config中配置的股票均已订阅报价+快照")
+            except Exception:
+                pass
                 
         except Exception as e:
             self.logger.error(f"订阅股票报价异常: {e}")
@@ -329,48 +358,76 @@ class OptionMonitor:
             # 缓存无效，获取实时股价
             ret_snap, snap_data = self.quote_ctx.get_market_snapshot([stock_code])
             if ret_snap == ft.RET_OK and not snap_data.empty:
-                price = snap_data.iloc[0]['last_price']
-                # 更新缓存
-                if isinstance(price, dict):
-                    self.stock_price_cache[stock_code] = price
-                else:
-                    # 兼容旧格式，转换为新格式
-                    self.stock_price_cache[stock_code] = {
-                        'price': price,
-                        'name': stock_name if 'stock_name' in locals() else ''
-                    }
+                # 提取行数据并尽量补齐成交额/量/名称
+                row0 = snap_data.iloc[0]
+                price = float(row0.get('last_price'))
+                info = {'price': price}
+                try:
+                    tv = row0.get('turnover', None)
+                    if tv is not None:
+                        info['turnover'] = float(tv)
+                except Exception:
+                    pass
+                try:
+                    vol0 = row0.get('volume', None)
+                    if vol0 is not None:
+                        info['volume'] = int(vol0)
+                except Exception:
+                    pass
+                try:
+                    nm0 = row0.get('name', None)
+                    if nm0 and str(nm0).strip():
+                        info['name'] = str(nm0)
+                except Exception:
+                    pass
+                # 若名称仍缺，从基础信息补齐
+                try:
+                    if 'name' not in info:
+                        base = self.stock_base_info.get(stock_code, {})
+                        if isinstance(base, dict) and base.get('name'):
+                            info['name'] = base['name']
+                except Exception:
+                    pass
+                self.stock_price_cache[stock_code] = info
                 self.price_update_time[stock_code] = datetime.now()
                 
                 # 定期保存股价缓存到文件
                 if len(self.stock_price_cache) % 5 == 0:  # 每更新5个股价保存一次
                     self._save_stock_prices_cache()
-                self.logger.debug(f"获取实时股价: {stock_code} = {price}")
+                self.logger.debug(f"获取实时股价: {stock_code} = {price}, 成交额={info.get('turnover', '')}, 成交量={info.get('volume', '')}")
                 return price
             else:
                 self.logger.warning(f"获取{stock_code}股价失败")
                 
                 # 如果缓存中有旧数据，返回旧数据
                 if stock_code in self.stock_price_cache:
-                    self.logger.debug(f"使用旧缓存的股价: {stock_code} = {self.stock_price_cache[stock_code]}")
-                    return self.stock_price_cache[stock_code]
+                    cached_val = self.stock_price_cache[stock_code]
+                    self.logger.debug(f"使用旧缓存的股价: {stock_code} = {cached_val}")
+                    return (cached_val.get('price', 0.0) if isinstance(cached_val, dict) else float(cached_val or 0.0))
                 
-                # 使用默认股价
-                default_prices = {
-                    'HK.00700': 600.0,  # 腾讯控股
-                    'HK.09988': 80.0,   # 阿里巴巴
-                    'HK.03690': 120.0,  # 美团
-                    'HK.01810': 12.0,   # 小米集团
-                    'HK.09618': 120.0,  # 京东集团
-                    'HK.02318': 40.0,   # 中国平安
-                    'HK.00388': 300.0,  # 香港交易所
-                }
+                # 从本地缓存文件回退
+                try:
+                    if os.path.exists(self.stock_prices_file):
+                        with open(self.stock_prices_file, 'r', encoding='utf-8') as f:
+                            sp = json.load(f)
+                        prices = sp.get('prices') if isinstance(sp, dict) else {}
+                        info = prices.get(stock_code) if isinstance(prices, dict) else None
+                        if isinstance(info, dict) and 'price' in info:
+                            self.logger.info(f"使用文件缓存股价: {stock_code} = {info['price']}")
+                            # 同步到内存缓存
+                            self.stock_price_cache[stock_code] = info
+                            self.price_update_time[stock_code] = datetime.now()
+                            return float(info['price'])
+                        elif isinstance(info, (int, float)):
+                            self.logger.info(f"使用文件缓存股价: {stock_code} = {info}")
+                            self.stock_price_cache[stock_code] = {'price': float(info)}
+                            self.price_update_time[stock_code] = datetime.now()
+                            return float(info)
+                except Exception as _e:
+                    self.logger.debug(f"读取文件缓存失败(忽略): {_e}")
                 
-                if stock_code in default_prices:
-                    default_price = default_prices[stock_code]
-                    self.logger.info(f"使用默认股价: {stock_code} = {default_price}")
-                    return default_price
-                
-                return 100.0  # 通用默认价格
+                self.logger.info(f"使用兜底默认股价: {stock_code} = 100.0")
+                return 100.0
                 
         except Exception as e:
             self.logger.error(f"获取{stock_code}股价异常: {e}")
@@ -1100,6 +1157,8 @@ class OptionMonitor:
         return {
             'is_running': self.is_running,
             'monitored_stocks': MONITOR_STOCKS,
+            'subscribed_stocks': list(self.subscribed_stocks) if hasattr(self, 'subscribed_stocks') else [],
+            'missing_subscriptions': [c for c in MONITOR_STOCKS if not hasattr(self, 'subscribed_stocks') or c not in self.subscribed_stocks],
             'filter_conditions': OPTION_FILTER,
             'trading_time': self._is_trading_time()
         }
@@ -1151,6 +1210,13 @@ class StockQuoteHandler(ft.StockQuoteHandlerBase):
                     info['turnover'] = float(turnover)
                 except Exception:
                     pass
+            # 记录成交量（如推送包含）
+            try:
+                vol = row.get('volume', None)
+                if vol is not None:
+                    info['volume'] = int(vol)
+            except Exception:
+                pass
             if stock_name and not info.get('name'):
                 info['name'] = stock_name
             
@@ -1171,7 +1237,7 @@ class StockQuoteHandler(ft.StockQuoteHandlerBase):
                 pass
             
             # 记录股价变动
-            self.logger.debug(f"股价更新: {stock_code} 价格={last_price}, 成交额={info.get('turnover', '')}")
+            self.logger.debug(f"股价更新: {stock_code} 价格={last_price}, 成交额={info.get('turnover', '')}, 成交量={info.get('volume', '')}")
         
         return ret_code, data
 

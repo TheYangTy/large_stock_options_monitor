@@ -66,11 +66,11 @@ class Notifier:
             self._send_wework_notification(trade_info)
     
     def _format_trade_message(self, trade_info: Dict[str, Any]) -> str:
-        """格式化交易信息"""
+        """格式化交易信息（时间兼容格式化 + 展示期权类型）"""
         # 获取变化量信息
         volume_diff = trade_info.get('volume_diff', 0)
         last_volume = trade_info.get('last_volume', 0)
-        
+
         # 格式化变化量显示
         if volume_diff > 0:
             diff_display = f"变化量: +{volume_diff} 手 (上次: {last_volume})\n"
@@ -78,22 +78,54 @@ class Notifier:
             diff_display = f"变化量: {volume_diff} 手 (上次: {last_volume})\n"
         else:
             diff_display = f"变化量: 无变化 (当前: {trade_info.get('volume', 0)})\n"
-        
+
         # 获取股票名称
         stock_name = trade_info.get('stock_name', '')
         stock_display = f"{trade_info['stock_code']} {stock_name}" if stock_name else trade_info['stock_code']
-        
+
+        # 使用原始方向字符串，不做中文映射
+        direction_display = str(trade_info.get('direction', 'Unknown') or 'Unknown')
+
+        # 发现时间格式化（兼容 datetime 或 ISO 字符串）
+        ts_obj = trade_info.get('timestamp')
+        ts_text = ''
+        try:
+            if hasattr(ts_obj, 'strftime'):
+                ts_text = ts_obj.strftime('%Y-%m-%d %H:%M:%S')
+            elif isinstance(ts_obj, str):
+                try:
+                    ts_text = datetime.fromisoformat(ts_obj).strftime('%Y-%m-%d %H:%M:%S')
+                except Exception:
+                    ts_text = ts_obj
+            else:
+                ts_text = ''
+        except Exception:
+            ts_text = ''
+
+        # 可选：解析期权类型（Call/Put），用于增强文案（不影响现有格式）
+        opt_type_text = ''
+        try:
+            code = trade_info.get('option_code', '')
+            if isinstance(code, str) and code.startswith('HK.'):
+                code_part = code[3:]
+                import re as _re
+                m = _re.search(r'([CP])(\d+)$', code_part)
+                if m:
+                    opt_type_text = 'Call (看涨)' if m.group(1) == 'C' else 'Put (看跌)'
+        except Exception:
+            opt_type_text = ''
+
         return (
             f"🚨 期权大单交易提醒 🚨\n"
             f"股票: {stock_display}\n"
-            f"期权代码: {trade_info['option_code']}\n"
-            f"交易时间: {trade_info['time']}\n"
-            f"交易价格: {trade_info['price']:.4f}\n"
-            f"交易数量: {trade_info['volume']:,}\n"
-            f"交易金额: {trade_info['turnover']:,.2f} HKD\n"
-            f"交易方向: {trade_info['direction']}\n"
+            f"期权代码: {trade_info.get('option_code', 'Unknown')}{(' | ' + opt_type_text) if opt_type_text else ''}\n"
+            f"交易时间: {trade_info.get('time', '')}\n"
+            f"交易价格: {float(trade_info.get('price', 0)):.4f}\n"
+            f"交易数量: {int(trade_info.get('volume', 0)):,}\n"
+            f"交易金额: {float(trade_info.get('turnover', 0)):,.2f} HKD\n"
+            f"交易方向: {direction_display}\n"
             f"{diff_display}"
-            f"发现时间: {trade_info['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"发现时间: {ts_text}\n"
             f"{'='*50}"
         )
     
@@ -181,7 +213,28 @@ class Notifier:
             # 添加股票名称
             stock_name = self._get_stock_name(trade_info['stock_code'])
             trade_info['stock_name'] = stock_name
-            
+
+            # 解析期权类型并带入trade_info，兼容模板字段(tx)
+            try:
+                code = trade_info.get('option_code', '')
+                opt_type = ''
+                opt_type_text = ''
+                if isinstance(code, str) and code.startswith('HK.'):
+                    code_part = code[3:]
+                    import re as _re
+                    m = _re.search(r'([CP])(\d+)$', code_part)
+                    if m:
+                        opt_type = 'Call' if m.group(1) == 'C' else 'Put'
+                        opt_type_text = 'Call (看涨)' if opt_type == 'Call' else 'Put (看跌)'
+                # 写入期权类型字段
+                if opt_type:
+                    trade_info['option_type'] = opt_type
+                    trade_info['option_type_text'] = opt_type_text
+                    # 兼容模板使用的 tx 字段
+                    trade_info.setdefault('tx', opt_type)
+            except Exception:
+                pass
+
             # 发送企业微信通知
             self.wework_notifier.send_big_option_alert(trade_info)
             self.logger.debug(f"企业微信通知已发送: {trade_info['option_code']}")

@@ -17,3 +17,4 @@ data/hk_earnings_calendar.json
 data/pushed_options.json
 templates/dashboard_backup.html
 hk_financial_reports.db
+data/stock_prices.json

@@ -386,92 +386,106 @@ def get_big_options_summary():
                 else:
                     option['option_type'] = '未知'
             
-            # 确保交易方向字段存在
-            # 去掉交易方向推断
-            # if 'direction' not in option or not option['direction'] or option['direction'] == '未知':
-            #     option['direction'] = direction_analyzer.analyze_direction(option)
-                
-                # 如果方向仍然是未知，根据期权类型和成交量/价格变化推断
-                if option['direction'] == '未知':
-                    option_type = option.get('option_type', '')
-                    change_rate = option.get('change_rate', 0)
-                    
-                    # 根据期权类型和价格变化推断方向
-                    if 'Call' in option_type or '看涨' in option_type:
-                        option['direction'] = '买入看涨' if change_rate >= 0 else '卖出看涨'
-                    elif 'Put' in option_type or '看跌' in option_type:
-                        option['direction'] = '买入看跌' if change_rate >= 0 else '卖出看跌'
+            # 计算并补充变化量 diff 字段（优先 volume_diff，否则 volume - last_volume），并补齐 last_volume
+            try:
+                if 'diff' not in option:
+                    if option.get('volume_diff') is not None:
+                        option['diff'] = int(option.get('volume_diff') or 0)
                     else:
-                        option_code = option.get('option_code', '')
-                        if 'C' in option_code.upper():
-                            option['direction'] = '买入看涨'
-                        elif 'P' in option_code.upper():
-                            option['direction'] = '买入看跌'
-                        else:
-                            option['direction'] = '买入'
+                        cur_vol = int(option.get('volume') or 0)
+                        last_vol = int(option.get('last_volume') or 0)
+                        option['diff'] = cur_vol - last_vol
+                if 'last_volume' not in option or option.get('last_volume') is None:
+                    option['last_volume'] = int(option.get('volume', 0)) - int(option.get('diff', 0))
+            except Exception:
+                try:
+                    option['diff'] = int(option.get('volume_diff') or 0)
+                except Exception:
+                    option['diff'] = 0
+                if 'last_volume' not in option:
+                    option['last_volume'] = 0
         
         # 检查数据是否有变化
         current_data_hash = hash(str(summary))
         data_changed = last_data_hash is not None and current_data_hash != last_data_hash
 
-        # 应用筛选器：按股票代码与股票名称（包含匹配，不区分大小写）
+        # 应用筛选器：支持多选股票(stock_codes)、模糊名称、与成交额占比过滤
         code_filter = request.args.get('stock_code', '').strip()
         name_filter = request.args.get('stock_name', '').strip()
-        if (code_filter or name_filter) and isinstance(big_options, list):
-            cf = code_filter.lower()
-            nf = name_filter.lower()
+        # 多选股票：支持 stock_codes=HK.00700,HK.09988 或多值 stock_codes[]=...
+        stock_codes_param = request.args.get('stock_codes', '')
+        stock_codes_list = []
+        try:
+            if stock_codes_param:
+                stock_codes_list = [c.strip() for c in stock_codes_param.split(',') if c.strip()]
+            else:
+                # 支持数组参数
+                stock_codes_list = request.args.getlist('stock_codes[]')
+                stock_codes_list = [c.strip() for c in stock_codes_list if c.strip()]
+        except Exception:
+            stock_codes_list = []
+
+        only_big_ratio = str(request.args.get('only_big_ratio', 'false')).lower() in ('1', 'true', 'yes')
+
+        if isinstance(big_options, list):
             def _match(opt):
                 try:
-                    code = str(opt.get('stock_code', '')).lower()
-                    name = str(opt.get('stock_name', '')).lower()
-                    okc = True if not cf else (cf in code)
-                    okn = True if not nf else (nf in name)
-                    return okc and okn
+                    code = str(opt.get('stock_code', ''))
+                    name = str(opt.get('stock_name', ''))
+                    # 代码/名称模糊
+                    okc = True if not code_filter else (code_filter.lower() in code.lower())
+                    okn = True if not name_filter else (name_filter.lower() in name.lower())
+                    # 多选股票（若提供则必须命中）
+                    oks = True if not stock_codes_list else (code in stock_codes_list)
+                    return okc and okn and oks
                 except Exception:
                     return False
+
             before = len(big_options)
             big_options = [o for o in big_options if isinstance(o, dict) and _match(o)]
-            logger.info(f"筛选: code='{code_filter}', name='{name_filter}' => {len(big_options)}/{before}")
+            logger.info(f"筛选: code='{code_filter}', name='{name_filter}', multi={len(stock_codes_list)} => {len(big_options)}/{before}")
+
+            # 仅看成交额占比>0.01%（turnover / stock_turnover >= 0.0001）
+            if only_big_ratio:
+                filtered = []
+                for o in big_options:
+                    try:
+                        to = float(o.get('turnover') or 0)
+                        st = float(o.get('stock_turnover') or 0)
+                        ratio = (to / st) if st > 0 else 0.0
+                        o['ratio'] = ratio  # 附加给前端
+                        if ratio >= 0.0001:
+                            filtered.append(o)
+                    except Exception:
+                        o['ratio'] = 0.0
+                logger.info(f"占比过滤 only_big_ratio=True 后保留 {len(filtered)}/{len(big_options)}")
+                big_options = filtered
+            else:
+                # 仍附加 ratio 字段，便于前端显示
+                for o in big_options:
+                    try:
+                        to = float(o.get('turnover') or 0)
+                        st = float(o.get('stock_turnover') or 0)
+                        o['ratio'] = (to / st) if st > 0 else 0.0
+                    except Exception:
+                        o['ratio'] = 0.0
         
         # 更新数据哈希值
         last_data_hash = current_data_hash
         
-        # 对数据进行排序：首先按股票分组，然后在相同股票内按成交额排序
+        # 对数据进行排序：优先按股票名称(升序)，再按成交额(降序)
         if isinstance(big_options, list) and big_options:
-            # 定义股票顺序映射（可以根据需要调整顺序）
-            stock_order = {
-                'HK.00700': 1,  # 腾讯控股
-                'HK.09988': 2,  # 阿里巴巴
-                'HK.03690': 3,  # 美团
-                'HK.01810': 4,  # 小米集团
-                'HK.09618': 5,  # 京东集团
-                'HK.02318': 6,  # 中国平安
-                'HK.00388': 7,  # 香港交易所
-                'HK.00981': 8,  # 中芯国际
-            }
-            
             def sort_key(option):
-                stock_code = option.get('stock_code', '')
-                # 成交量优先排序（降序），类型不确定时安全转换
-                vol = option.get('volume', 0)
+                # 股票名称缺失时回退为股票代码
+                name = str(option.get('stock_name') or option.get('stock_code') or '')
+                # 成交额降序
                 try:
-                    vol = int(vol)
-                except Exception:
-                    vol = 0
-                # 成交额次序（降序），保证为float
-                try:
-                    to = float(option.get('turnover', 0))
+                    to = float(option.get('turnover', 0) or 0)
                 except Exception:
                     to = 0.0
-                # 获取股票排序权重，未知股票排在最后
-                stock_weight = stock_order.get(stock_code, 999)
-                # 为确保稳定性，加入股票代码作为次级分组键
-                sc = str(stock_code)
-                # 返回排序键：(股票权重, 股票代码, -成交量, -成交额)
-                return (stock_weight, sc, -vol, -to)
-            
+                return (name, -to)
             big_options.sort(key=sort_key)
-            logger.debug(f"已对 {len(big_options)} 笔交易进行排序：按股票分组，组内按成交量、成交额降序")
+            logger.debug(f"已对 {len(big_options)} 笔交易进行排序：按股票名称升序、成交额降序")
         
         # 确保数据格式正确
         result = {

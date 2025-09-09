@@ -143,6 +143,7 @@
                                         <th>期权价格</th>
                                         <th>成交量</th>
                                         <th>成交额</th>
+                                        <th>成交额增量(万)</th>
                                         <th>成交额占比(%)</th>
                                         <th>时间</th>
                                     </tr>
@@ -458,6 +459,16 @@
                                 ratioClass = 'ratio-black';
                             }
                             
+                            // 计算成交额增量(万)
+                            let turnoverDiffWan = '';
+                            try {
+                                const td = (option.turnover_diff != null) ? Number(option.turnover_diff) : Number((option.price || 0) * (option.diff || 0));
+                                if (!Number.isNaN(td) && td !== 0) {
+                                    const sign = td > 0 ? '+' : '';
+                                    turnoverDiffWan = sign + (td / 10000).toFixed(1);
+                                }
+                            } catch (e) { turnoverDiffWan = ''; }
+
                             // 格式化时间
                             const timestamp = option.timestamp ? 
                                 new Date(option.timestamp).toLocaleString('zh-CN', { 
@@ -481,7 +492,8 @@
                                 <td><span class="badge ${optionType.badge}">${optionType.text}</span></td>
                                 <td>${option.price ? option.price.toFixed(2) : ''}</td>
                                 <td>${option.volume || ''}</td>
-                                <td>${option.turnover ? formatNumber(option.turnover) : ''}</td>
+                                <td>${(option.turnover != null) ? (Number(option.turnover) / 10000).toFixed(1) : ''}</td>
+                                <td>${turnoverDiffWan}</td>
                                 <td><span class="turnover-ratio ${ratioClass}">${turnoverRatio}</span></td>
                                 <td>${timestamp}</td>
                             `;

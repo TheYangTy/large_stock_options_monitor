@@ -405,6 +405,31 @@ def get_big_options_summary():
                 if 'last_volume' not in option:
                     option['last_volume'] = 0
         
+        # 计算成交额增量（turnover_diff）：优先使用 last_turnover，缺失则退化为 price * diff
+        try:
+            for option in big_options:
+                if not isinstance(option, dict):
+                    continue
+                # turnover_diff
+                if ('turnover_diff' not in option) or (option.get('turnover_diff') is None):
+                    try:
+                        if 'last_turnover' in option and option.get('last_turnover') is not None:
+                            option['turnover_diff'] = float(option.get('turnover') or 0) - float(option.get('last_turnover') or 0)
+                        else:
+                            price_val = float(option.get('price') or 0)
+                            diff_val = int(option.get('diff') or 0)
+                            option['turnover_diff'] = float(price_val * diff_val)
+                    except Exception:
+                        option['turnover_diff'] = 0.0
+                # last_turnover 补齐
+                if ('last_turnover' not in option) or (option.get('last_turnover') is None):
+                    try:
+                        option['last_turnover'] = float(option.get('turnover') or 0) - float(option.get('turnover_diff') or 0)
+                    except Exception:
+                        option['last_turnover'] = 0.0
+        except Exception:
+            logger.debug("turnover_diff 计算失败，已忽略", exc_info=True)
+
         # 检查数据是否有变化
         current_data_hash = hash(str(summary))
         data_changed = last_data_hash is not None and current_data_hash != last_data_hash

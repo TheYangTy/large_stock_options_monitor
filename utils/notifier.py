@@ -235,9 +235,33 @@ class Notifier:
             except Exception:
                 pass
 
-            # 发送企业微信通知
-            self.wework_notifier.send_big_option_alert(trade_info)
-            self.logger.debug(f"企业微信通知已发送: {trade_info['option_code']}")
+            # 发送企业微信通知（主 webhook）
+            ok_main = self.wework_notifier.send_big_option_alert(trade_info)
+            self.logger.debug(f"企业微信通知已发送: {trade_info['option_code']} (主webhook: {bool(ok_main)})")
+
+            # 兼容额外 webhook 列表
+            try:
+                from config import NOTIFICATION as _NOTIF_
+                wework_cfg = _NOTIF_.get('wework_config', {}) if isinstance(_NOTIF_, dict) else {}
+                extra_urls = wework_cfg.get('extra_webhook_urls', [])
+                if isinstance(extra_urls, str):
+                    extra_urls = [extra_urls] if extra_urls.strip() else []
+                if isinstance(extra_urls, list) and extra_urls:
+                    for url in extra_urls:
+                        try:
+                            if not url or not isinstance(url, str):
+                                continue
+                            extra_notifier = WeWorkNotifier(
+                                webhook_url=url.strip(),
+                                mentioned_list=wework_cfg.get('mentioned_list', []),
+                                mentioned_mobile_list=wework_cfg.get('mentioned_mobile_list', [])
+                            )
+                            ok = extra_notifier.send_big_option_alert(trade_info)
+                            self.logger.debug(f"企业微信通知已发送(额外): {trade_info['option_code']} -> {url[:40]}... (ok={bool(ok)})")
+                        except Exception as _e:
+                            self.logger.warning(f"额外webhook发送失败: {url}, err={_e}")
+            except Exception as _e2:
+                self.logger.warning(f"处理额外webhook发生异常: {_e2}")
             
         except Exception as e:
             self.logger.error(f"发送企业微信通知失败: {e}")
@@ -268,10 +292,48 @@ class Notifier:
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
             
-            # 发送企业微信汇总通知
+            # 发送企业微信汇总通知（主 webhook）
             if NOTIFICATION.get('enable_wework_bot', False) and self.wework_notifier:
-                self.wework_notifier.send_summary_report(summary_data)
-                self.logger.info(f"企业微信汇总通知已发送: {len(big_options)}笔交易")
+                # 收集所有需要标记为已推送的记录ID
+                all_option_ids = []
+                
+                # 主webhook推送
+                result_main, option_ids_main = self.wework_notifier.send_summary_report(summary_data)
+                if option_ids_main:
+                    all_option_ids.extend(option_ids_main)
+                self.logger.info(f"企业微信汇总通知已发送(主webhook): {len(big_options)}笔交易, ok={bool(result_main)}")
+
+                # 额外 webhook 并行发送
+                try:
+                    wework_cfg = NOTIFICATION.get('wework_config', {}) if isinstance(NOTIFICATION, dict) else {}
+                    extra_urls = wework_cfg.get('extra_webhook_urls', [])
+                    if isinstance(extra_urls, str):
+                        extra_urls = [extra_urls] if extra_urls.strip() else []
+                    if isinstance(extra_urls, list) and extra_urls:
+                        for url in extra_urls:
+                            try:
+                                if not url or not isinstance(url, str):
+                                    continue
+                                extra_notifier = WeWorkNotifier(
+                                    webhook_url=url.strip(),
+                                    mentioned_list=wework_cfg.get('mentioned_list', []),
+                                    mentioned_mobile_list=wework_cfg.get('mentioned_mobile_list', [])
+                                )
+                                result, option_ids = extra_notifier.send_summary_report(summary_data)
+                                # 不需要收集额外的option_ids，因为它们与主webhook的相同
+                                self.logger.info(f"企业微信汇总通知已发送(额外): ok={bool(result)} url={url[:40]}...")
+                            except Exception as _e:
+                                self.logger.warning(f"额外webhook汇总发送失败: {url}, err={_e}")
+                except Exception as _e2:
+                    self.logger.warning(f"处理额外webhook(汇总)发生异常: {_e2}")
+                
+                # 所有webhook推送完成后，统一更新缓存
+                if all_option_ids:
+                    try:
+                        self.wework_notifier.push_record_manager.mark_batch_as_pushed(all_option_ids)
+                        self.logger.info(f"已更新推送记录缓存，标记{len(all_option_ids)}条记录为已推送")
+                    except Exception as e:
+                        self.logger.error(f"更新推送记录缓存失败: {e}")
                 
         except Exception as e:
             self.logger.error(f"发送大单期权汇总失败: {e}")

@@ -296,8 +296,8 @@ class OptionMonitor:
             for i in range(0, len(new_stocks), batch_size):
                 batch_codes = new_stocks[i:i+batch_size]
                 
-                # 订阅股票报价与快照
-                ret, data = self.quote_ctx.subscribe(batch_codes, [ft.SubType.QUOTE, ft.SubType.SNAPSHOT])
+                # 订阅股票报价（移除不存在的SNAPSHOT类型）
+                ret, data = self.quote_ctx.subscribe(batch_codes, [ft.SubType.QUOTE])
                 if ret == ft.RET_OK:
                     self.logger.info(f"成功订阅 {len(batch_codes)} 只股票的报价+快照")
                     # 更新已订阅列表
@@ -317,7 +317,7 @@ class OptionMonitor:
                         batch_size2 = 50
                         for i2 in range(0, len(missing), batch_size2):
                             batch_codes2 = missing[i2:i2+batch_size2]
-                            ret2, data2 = self.quote_ctx.subscribe(batch_codes2, [ft.SubType.QUOTE, ft.SubType.SNAPSHOT])
+                            ret2, data2 = self.quote_ctx.subscribe(batch_codes2, [ft.SubType.QUOTE])
                             if ret2 == ft.RET_OK:
                                 self.subscribed_stocks.update(batch_codes2)
                                 self.logger.info(f"补订成功 {len(batch_codes2)} 只股票")

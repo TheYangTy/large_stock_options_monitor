@@ -122,7 +122,7 @@ class WeWorkNotifier:
             self.logger.error(f"发送期权大单提醒失败: {e}")
             return False
     
-    def send_summary_report(self, summary_data: Dict[str, Any]) -> bool:
+    def send_summary_report(self, summary_data: Dict[str, Any]) -> tuple:
         """发送汇总报告"""
         try:
             trades = summary_data.get('trades', [])
@@ -130,7 +130,8 @@ class WeWorkNotifier:
             
             if not trades:
                 content = f"📊 期权监控汇总报告\n⏰ 时间: {timestamp}\n📈 状态: 暂无大单交易"
-                return self.send_text_message(content)
+                result = self.send_text_message(content)
+                return result, []
             
             # 过滤出新的期权记录
             new_trades = self.push_record_manager.filter_new_options(trades)
@@ -147,7 +148,8 @@ class WeWorkNotifier:
 ⏰ 时间: {timestamp}
 📈 总交易: {total_trades} 笔 (无新增)
 💰 总金额: {total_amount:,.0f} 港币"""
-                return self.send_text_message(content)
+                result = self.send_text_message(content)
+                return result, []
             
             # 过滤出符合min_volume要求的新增交易
             filtered_new_trades = []
@@ -190,10 +192,12 @@ class WeWorkNotifier:
 📈 总交易: {total_trades} 笔 (新增: {new_trades_count} 笔，符合通知条件: 0 笔)
 💰 总金额: {total_amount:,.0f} 港币 (新增: {new_amount:,.0f} 港币)
 📝 说明: 新增交易量未达到通知阈值"""
-                # 仍然标记所有新交易为已推送（更新缓存）
+                # 获取需要标记为已推送的ID，但不立即更新缓存
                 option_ids = [trade.get('_id') for trade in new_trades if '_id' in trade]
-                self.push_record_manager.mark_batch_as_pushed(option_ids)
-                return self.send_text_message(content)
+                
+                # 发送消息并返回结果和需要标记的ID
+                result = self.send_text_message(content)
+                return result, option_ids
             
             content = f"""📊 期权监控汇总报告
 ⏰ 时间: {timestamp}
@@ -244,11 +248,12 @@ class WeWorkNotifier:
                     
                     content += f"\n  {i}. {trade.get('option_code', '')}: {option_type}{direction_display}, {price:.3f}×{volume}手{diff_text}, {turnover/10000:.1f}万"
             
-            # 将新交易标记为已推送
+            # 获取需要标记为已推送的ID，但不立即更新缓存
             option_ids = [trade.get('_id') for trade in new_trades if '_id' in trade]
-            self.push_record_manager.mark_batch_as_pushed(option_ids)
             
-            return self.send_text_message(content)
+            # 发送消息并返回结果和需要标记的ID
+            result = self.send_text_message(content)
+            return result, option_ids
             
         except Exception as e:
             self.logger.error(f"发送汇总报告失败: {e}")

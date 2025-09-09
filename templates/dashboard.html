@@ -111,40 +111,7 @@
                                 <button id="btn-clear-filters" class="btn btn-secondary btn-sm">清除筛选</button>
                             </div>
                         </div>
-                        <div class="row mb-4">
-                            <div class="col-md-3">
-                                <div class="card">
-                                    <div class="card-body text-center">
-                                        <h6 class="card-title text-muted">总交易笔数</h6>
-                                        <h3 id="total-count">0</h3>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="card">
-                                    <div class="card-body text-center">
-                                        <h6 class="card-title text-muted">总成交金额</h6>
-                                        <h3 id="total-turnover">0</h3>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="card">
-                                    <div class="card-body text-center">
-                                        <h6 class="card-title text-muted">平均成交金额</h6>
-                                        <h3 id="avg-turnover">0</h3>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="card">
-                                    <div class="card-body text-center">
-                                        <h6 class="card-title text-muted">涉及股票数</h6>
-                                        <h3 id="unique-stocks">0</h3>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                        <!-- 汇总四卡片已移除 -->
                         
                         <div class="table-responsive">
                             <table class="table table-striped table-hover">
@@ -410,11 +377,15 @@
                 .then(data => {
                     console.log('获取到的数据:', data);
                     
-                    // 更新统计信息
-                    document.getElementById('total-count').textContent = data.total_count || 0;
-                    document.getElementById('total-turnover').textContent = formatNumber(data.statistics?.total_turnover || 0);
-                    document.getElementById('avg-turnover').textContent = formatNumber(data.statistics?.avg_turnover || 0);
-                    document.getElementById('unique-stocks').textContent = data.statistics?.unique_stocks || 0;
+                    // 更新统计信息（若元素存在时才更新，避免已移除导致报错）
+                    const elTotalCount = document.getElementById('total-count');
+                    if (elTotalCount) elTotalCount.textContent = data.total_count || 0;
+                    const elTotalTurnover = document.getElementById('total-turnover');
+                    if (elTotalTurnover) elTotalTurnover.textContent = formatNumber(data.statistics?.total_turnover || 0);
+                    const elAvgTurnover = document.getElementById('avg-turnover');
+                    if (elAvgTurnover) elAvgTurnover.textContent = formatNumber(data.statistics?.avg_turnover || 0);
+                    const elUniqueStocks = document.getElementById('unique-stocks');
+                    if (elUniqueStocks) elUniqueStocks.textContent = data.statistics?.unique_stocks || 0;
                     
                     // 更新表格数据
                     const tableBody = document.getElementById('big-options-table');

@@ -53,6 +53,9 @@ class OptionMonitor:
         self.stock_prices_file = os.path.join(os.path.dirname(DATA_CONFIG['csv_path']), 'stock_prices.json')
         self.option_chains_file = os.path.join(os.path.dirname(DATA_CONFIG['csv_path']), 'option_chains.json')
         self._last_option_chains_save = None  # 期权链缓存最近一次保存时间
+        # 新增：基础信息文件（保存股票名称等基本不变字段）
+        self.stock_base_info_file = os.path.join(os.path.dirname(DATA_CONFIG['csv_path']), 'stock_base_info.json')
+        self.stock_base_info = {}
         
         # 加载缓存
         self._load_stock_prices_cache()
@@ -61,9 +64,73 @@ class OptionMonitor:
         # 初始化Futu连接
         self._init_futu_connection()
         
+    # 新增：仅用非空字段更新的辅助方法
+    def _merge_non_empty(self, dst: dict, src: dict) -> dict:
+        if not isinstance(dst, dict):
+            dst = {}
+        if not isinstance(src, dict):
+            return dst
+        for k, v in src.items():
+            if v is None:
+                continue
+            if isinstance(v, str) and v.strip() == "":
+                continue
+            dst[k] = v
+        return dst
+
+    # 新增：基础信息文件 读取/保存
+    def _load_stock_base_info(self):
+        try:
+            if os.path.exists(self.stock_base_info_file):
+                with open(self.stock_base_info_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                stocks = data.get('stocks') if isinstance(data, dict) else None
+                if isinstance(stocks, dict):
+                    self.stock_base_info = stocks
+                elif isinstance(data, dict):
+                    # 兼容平铺结构
+                    self.stock_base_info = {k: v for k, v in data.items() if isinstance(v, dict)}
+                else:
+                    self.stock_base_info = {}
+            else:
+                # 若不存在，尝试从旧的 stock_prices.json 中抽取名称生成
+                base = {}
+                if os.path.exists(self.stock_prices_file):
+                    try:
+                        with open(self.stock_prices_file, 'r', encoding='utf-8') as f:
+                            sp = json.load(f)
+                        for code, info in (sp.get('prices') or {}).items():
+                            if isinstance(info, dict):
+                                name = info.get('name')
+                                if name:
+                                    base[code] = {'name': name}
+                    except Exception:
+                        pass
+                self.stock_base_info = base
+                # 立即落盘，便于后续使用
+                self._save_stock_base_info()
+        except Exception as e:
+            self.logger.debug(f"加载基础信息失败(忽略): {e}")
+            if not hasattr(self, 'stock_base_info') or self.stock_base_info is None:
+                self.stock_base_info = {}
+
+    def _save_stock_base_info(self):
+        try:
+            os.makedirs(os.path.dirname(self.stock_base_info_file), exist_ok=True)
+            payload = {
+                'update_time': datetime.now().isoformat(),
+                'stocks': self.stock_base_info
+            }
+            with open(self.stock_base_info_file, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.logger.debug(f"保存基础信息失败(忽略): {e}")
+
     def _load_stock_prices_cache(self):
         """从文件加载股价缓存"""
         try:
+            # 先加载基础信息（如名称）
+            self._load_stock_base_info()
             if os.path.exists(self.stock_prices_file):
                 with open(self.stock_prices_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -71,6 +138,15 @@ class OptionMonitor:
                 if 'prices' in data:
                     # 转换为内部缓存格式
                     for stock_code, stock_info in data['prices'].items():
+                        # 统一为dict结构
+                        if not isinstance(stock_info, dict):
+                            stock_info = {'price': stock_info}
+                        # 合并基础信息中的非空名称
+                        base = self.stock_base_info.get(stock_code, {})
+                        name_from_base = base.get('name') if isinstance(base, dict) else None
+                        if name_from_base and not stock_info.get('name'):
+                            stock_info['name'] = name_from_base
+                        # 写入缓存
                         self.stock_price_cache[stock_code] = stock_info
                         # 将字符串时间转换为datetime对象
                         if 'update_time' in stock_info:
@@ -1081,6 +1157,18 @@ class StockQuoteHandler(ft.StockQuoteHandlerBase):
             # 更新缓存与时间
             self.monitor.stock_price_cache[stock_code] = info
             self.monitor.price_update_time[stock_code] = datetime.now()
+
+            # 更新基础信息文件（仅用非空值合并）
+            try:
+                if stock_name:
+                    prev_base = self.monitor.stock_base_info.get(stock_code, {})
+                    merged = dict(prev_base) if isinstance(prev_base, dict) else {}
+                    if stock_name and (merged.get('name') != stock_name):
+                        merged['name'] = stock_name
+                        self.monitor.stock_base_info[stock_code] = merged
+                        self.monitor._save_stock_base_info()
+            except Exception:
+                pass
             
             # 记录股价变动
             self.logger.debug(f"股价更新: {stock_code} 价格={last_price}, 成交额={info.get('turnover', '')}")

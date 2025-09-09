@@ -27,21 +27,46 @@ class BigOptionsProcessor:
         self.last_option_volumes = {}  # 缓存上一次的期权交易量
     
     def _load_stock_info_from_file(self, stock_code: str) -> Optional[Dict[str, Any]]:
-        """从 data/stock_prices.json 读取单只股票信息 {'price': float, 'name': str}"""
+        """从文件读取单只股票信息：price 来自 stock_prices.json，name 优先来自 stock_base_info.json"""
         try:
             base_dir = os.path.dirname(DATA_CONFIG['csv_path'])
             prices_file = os.path.join(base_dir, 'stock_prices.json')
-            if not os.path.exists(prices_file):
-                return None
-            with open(prices_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            info = data.get('prices', {}).get(stock_code)
-            if isinstance(info, dict):
-                # 统一返回格式
-                price = info.get('price')
-                name = info.get('name', '')
-                if isinstance(price, (int, float)):
-                    return {'price': float(price), 'name': name}
+            base_file = os.path.join(base_dir, 'stock_base_info.json')
+
+            price_val = None
+            name_val = ""
+
+            # 先尝试基础信息中的名称
+            try:
+                if os.path.exists(base_file):
+                    with open(base_file, 'r', encoding='utf-8') as f:
+                        base_data = json.load(f)
+                    stocks = base_data.get('stocks') if isinstance(base_data, dict) else None
+                    if isinstance(stocks, dict):
+                        base_info = stocks.get(stock_code)
+                        if isinstance(base_info, dict):
+                            n = base_info.get('name')
+                            if isinstance(n, str) and n.strip():
+                                name_val = n
+            except Exception:
+                pass
+
+            # 读取价格与（次级）名称
+            if os.path.exists(prices_file):
+                with open(prices_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                info = (data.get('prices') or {}).get(stock_code)
+                if isinstance(info, dict):
+                    pv = info.get('price')
+                    if isinstance(pv, (int, float)):
+                        price_val = float(pv)
+                    # 若基础信息没有名称，则尝试从这里补充
+                    n2 = info.get('name')
+                    if (not name_val) and isinstance(n2, str) and n2.strip():
+                        name_val = n2
+
+            if isinstance(price_val, (int, float)):
+                return {'price': float(price_val), 'name': name_val}
             return None
         except Exception:
             return None
@@ -182,25 +207,46 @@ class BigOptionsProcessor:
             for stock_code in stock_codes:
                 # 从option_monitor获取股价
                 if stock_code in option_monitor.stock_price_cache:
-                    price = option_monitor.stock_price_cache[stock_code]
-                    
-                    # 构建股票信息字典
+                    price_obj = option_monitor.stock_price_cache[stock_code]
+
+                    # 兼容 float 或 dict 两种结构
+                    actual_price = None
+                    name_from_monitor = ""
+                    if isinstance(price_obj, dict):
+                        try:
+                            pv = price_obj.get('price')
+                            if isinstance(pv, (int, float)):
+                                actual_price = float(pv)
+                            name_from_monitor = price_obj.get('name', '') or ""
+                        except Exception:
+                            actual_price = None
+                    else:
+                        if isinstance(price_obj, (int, float)):
+                            actual_price = float(price_obj)
+
                     stock_info = {
-                        'price': price,
-                        'name': ''  # option_monitor中可能没有存储名称
+                        'price': float(actual_price) if isinstance(actual_price, (int, float)) else 0.0,
+                        'name': name_from_monitor
                     }
-                    
-                    # 如果本地缓存中有名称信息，补充名称
+
+                    # 如果没有名称，尝试从文件缓存补齐
+                    if not stock_info['name']:
+                        file_info = self._load_stock_info_from_file(stock_code)
+                        if file_info and file_info.get('name'):
+                            stock_info['name'] = file_info['name']
+
+                    # 如果本地缓存中有名称信息，再次补充（优先已有非空）
                     if stock_code in self.stock_price_cache and isinstance(self.stock_price_cache[stock_code], dict):
                         old_info = self.stock_price_cache[stock_code]
-                        if 'name' in old_info and old_info['name']:
-                            stock_info['name'] = old_info['name']
+                        old_name = old_info.get('name', '') if isinstance(old_info, dict) else ''
+                        if old_name and not stock_info['name']:
+                            stock_info['name'] = old_name
                     
                     # 更新结果和本地缓存
                     result[stock_code] = stock_info
                     self.stock_price_cache[stock_code] = stock_info
                     self.price_cache_time[stock_code] = current_time
-                    self.logger.debug(f"从option_monitor获取股价: {stock_code} = {price}")
+                    self.logger.debug(f"从option_monitor获取股价: {stock_code} = {stock_info['price']}")
                 else:
                     # 如果option_monitor中没有，检查本地缓存
                     if stock_code in self.stock_price_cache and stock_code in self.price_cache_time:

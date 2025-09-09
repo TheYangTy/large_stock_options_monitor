@@ -258,6 +258,77 @@ def get_big_options_summary():
             
             if updated_name_count > 0 or updated_turnover_count > 0:
                 logger.info(f"已补充{updated_name_count}个股票名称和{updated_turnover_count}个成交额数据")
+            
+            # 如仍有缺失成交额的股票，尝试请求补齐；若失败，延迟10秒重试从缓存读取
+            try:
+                missing_codes = sorted(list({opt.get('stock_code') for opt in big_options
+                                             if isinstance(opt, dict) and opt.get('stock_code')
+                                             and (opt.get('stock_turnover') is None or float(opt.get('stock_turnover') or 0) == 0)}))
+            except Exception:
+                missing_codes = []
+            if missing_codes:
+                logger.info(f"发现{len(missing_codes)}只股票缺少成交额，尝试从行情接口补齐")
+                # 行情请求补齐
+                try:
+                    import futu as ft
+                    quote_ctx = ft.OpenQuoteContext(host='127.0.0.1', port=11111)
+                    ret_m, df_m = quote_ctx.get_market_snapshot(missing_codes)
+                    quote_ctx.close()
+                    if ret_m == ft.RET_OK and df_m is not None and not df_m.empty:
+                        for _, r in df_m.iterrows():
+                            c = r.get('code')
+                            if c:
+                                tv = r.get('turnover', None)
+                                if tv is not None:
+                                    try:
+                                        stock_turnover_map[c] = float(tv)
+                                    except Exception:
+                                        pass
+                        logger.info("已尝试通过行情接口补齐成交额")
+                except Exception as _e:
+                    logger.warning(f"行情补齐成交额失败: {_e}")
+                # 二次回填到big_options
+                try:
+                    fixed = 0
+                    for opt in big_options:
+                        code = opt.get('stock_code')
+                        if code and code in stock_turnover_map and (opt.get('stock_turnover') is None or float(opt.get('stock_turnover') or 0) == 0):
+                            opt['stock_turnover'] = stock_turnover_map[code]
+                            fixed += 1
+                    if fixed:
+                        logger.info(f"行情补齐后，已为{fixed}条记录填充成交额")
+                except Exception:
+                    pass
+                # 若仍缺失，延迟10秒后重读缓存文件再尝试
+                try:
+                    still_missing = [opt.get('stock_code') for opt in big_options
+                                     if isinstance(opt, dict) and opt.get('stock_code')
+                                     and (opt.get('stock_turnover') is None or float(opt.get('stock_turnover') or 0) == 0)]
+                    if still_missing:
+                        logger.info("仍有成交额缺失，10秒后重试从缓存读取")
+                        import time
+                        time.sleep(10)
+                        sp_path2 = os.path.join('data', 'stock_prices.json')
+                        if os.path.exists(sp_path2):
+                            with open(sp_path2, 'r', encoding='utf-8') as f2:
+                                sp2 = json.load(f2)
+                            prices2 = sp2.get('prices') if isinstance(sp2, dict) else {}
+                            if isinstance(prices2, dict):
+                                for code2 in still_missing:
+                                    info2 = prices2.get(code2)
+                                    if isinstance(info2, dict) and ('turnover' in info2) and (info2.get('turnover') is not None):
+                                        stock_turnover_map[code2] = info2['turnover']
+                        # 再次回填
+                        fixed2 = 0
+                        for opt in big_options:
+                            code = opt.get('stock_code')
+                            if code and code in stock_turnover_map and (opt.get('stock_turnover') is None or float(opt.get('stock_turnover') or 0) == 0):
+                                opt['stock_turnover'] = stock_turnover_map[code]
+                                fixed2 += 1
+                        if fixed2:
+                            logger.info(f"缓存重试后，已额外填充{fixed2}条成交额")
+                except Exception as _e2:
+                    logger.warning(f"缓存延迟重试失败: {_e2}")
 
         # 确保所有期权都有正确的正股股价和成交额数据
         logger.debug(f"确保所有期权都有正确的正股股价和成交额数据")
@@ -381,14 +452,26 @@ def get_big_options_summary():
             
             def sort_key(option):
                 stock_code = option.get('stock_code', '')
-                turnover = option.get('turnover', 0)
+                # 成交量优先排序（降序），类型不确定时安全转换
+                vol = option.get('volume', 0)
+                try:
+                    vol = int(vol)
+                except Exception:
+                    vol = 0
+                # 成交额次序（降序），保证为float
+                try:
+                    to = float(option.get('turnover', 0))
+                except Exception:
+                    to = 0.0
                 # 获取股票排序权重，未知股票排在最后
                 stock_weight = stock_order.get(stock_code, 999)
-                # 返回排序键：(股票权重, -成交额) 负号表示成交额降序
-                return (stock_weight, -turnover)
+                # 为确保稳定性，加入股票代码作为次级分组键
+                sc = str(stock_code)
+                # 返回排序键：(股票权重, 股票代码, -成交量, -成交额)
+                return (stock_weight, sc, -vol, -to)
             
             big_options.sort(key=sort_key)
-            logger.debug(f"已对 {len(big_options)} 笔交易进行排序：按股票分组，相同股票内按成交额降序")
+            logger.debug(f"已对 {len(big_options)} 笔交易进行排序：按股票分组，组内按成交量、成交额降序")
         
         # 确保数据格式正确
         result = {

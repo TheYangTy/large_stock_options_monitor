@@ -318,7 +318,7 @@ class OptionMonitor:
             # 检查缓存是否有效
             if stock_code in self.stock_price_cache and stock_code in self.price_update_time:
                 cache_time = self.price_update_time[stock_code]
-                if (datetime.now() - cache_time).seconds < 60:  # 缓存1分钟内有效
+                if (datetime.now() - cache_time).seconds < 600:  # 缓存10分钟内有效
                     cached = self.stock_price_cache[stock_code]
                     self.logger.debug(f"使用缓存的股价: {stock_code} = {cached}")
                     # 兼容两种缓存结构：float 或 {'price': x, 'name': y}

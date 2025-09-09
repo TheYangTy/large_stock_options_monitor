@@ -92,10 +92,6 @@
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">港股期权大单监控</h5>
-                        <div>
-                            <button id="testWeworkBtn" class="btn btn-sm btn-outline-primary me-2">测试企微推送</button>
-                            <button id="forcePushBtn" class="btn btn-sm btn-primary">强制推送大单</button>
-                        </div>
                     </div>
                     <div class="card-body">
                         <!-- 筛选区：股票筛选 -->
@@ -244,15 +240,7 @@
             // 设置自动刷新 (30秒)
             startAutoRefresh();
             
-            // 测试企微推送按钮
-            document.getElementById('testWeworkBtn').addEventListener('click', function() {
-                testWeworkConnection();
-            });
-            
-            // 强制推送大单按钮
-            document.getElementById('forcePushBtn').addEventListener('click', function() {
-                forcePushBigOptions();
-            });
+
         });
         
         // 启动自动刷新
@@ -471,39 +459,9 @@
                 });
         }
         
-        // 测试企微连接
-        function testWeworkConnection() {
-            fetch('/api/test_wework')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        alert('企微推送测试成功！');
-                    } else {
-                        alert('企微推送测试失败: ' + data.message);
-                    }
-                })
-                .catch(error => {
-                    console.error('测试企微连接失败:', error);
-                    alert('测试企微连接失败');
-                });
-        }
+
         
-        // 强制推送大单
-        function forcePushBigOptions() {
-            fetch('/api/force_push')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        alert('强制推送成功！' + data.message);
-                    } else {
-                        alert('强制推送失败: ' + data.message);
-                    }
-                })
-                .catch(error => {
-                    console.error('强制推送失败:', error);
-                    alert('强制推送失败');
-                });
-        }
+
     </script>
 </body>
 </html>

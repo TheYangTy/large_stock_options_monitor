@@ -86,6 +86,17 @@
         tr.put-option {
             border-left: 4px solid #dc3545;
         }
+        /* 股票行选中状态样式 */
+        .stock-row {
+            cursor: pointer;
+        }
+        .stock-row.selected {
+            background-color: rgba(13, 110, 253, 0.2) !important;
+            border: 2px solid #0d6efd;
+        }
+        .stock-row:hover {
+            background-color: rgba(13, 110, 253, 0.1);
+        }
     </style>
 </head>
 <body>
@@ -394,13 +405,15 @@
             // 读取筛选参数：单选股票与占比过滤
             const stockSelect = document.getElementById('stockSelect');
             const selectedCode = stockSelect ? stockSelect.value : '';
-            selectedStock = selectedCode; // 更新全局变量
+            
+            // 如果selectedStock全局变量已设置，优先使用它
+            const finalSelectedCode = selectedStock || selectedCode;
             
             const onlyBigRatio = document.querySelector('input[name="ratioFilter"]:checked')?.value === 'yes';
 
             const params = new URLSearchParams();
             if (isFirstLoad) params.set('first_load', 'true');
-            if (selectedCode) params.set('stock_codes', selectedCode);
+            if (finalSelectedCode) params.set('stock_codes', finalSelectedCode);
             if (onlyBigRatio) params.set('only_big_ratio', 'true');
 
             const url = `/api/big_options_summary?${params.toString()}`;
@@ -531,8 +544,53 @@
                 });
         }
         
-
+        // 处理股票行点击事件
+        function handleStockRowClick(stockCode, stockName) {
+            // 更新选中状态
+            if (selectedStock === stockCode) {
+                // 如果点击的是已选中的股票，则取消选择
+                selectedStock = '';
+                document.querySelectorAll('.stock-row').forEach(row => {
+                    row.classList.remove('selected');
+                });
+            } else {
+                // 选择新股票
+                selectedStock = stockCode;
+                document.querySelectorAll('.stock-row').forEach(row => {
+                    row.classList.remove('selected');
+                });
+                const targetRow = document.querySelector(`[data-stock-code="${stockCode}"]`);
+                if (targetRow) {
+                    targetRow.classList.add('selected');
+                }
+            }
+            
+            // 更新下拉选择框
+            const stockSelect = document.getElementById('stockSelect');
+            if (stockSelect) {
+                stockSelect.value = selectedStock || '';
+            }
+            
+            // 重新加载数据
+            loadBigOptionsSummary();
+        }
         
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 为表格行添加点击事件监听器
+            document.addEventListener('click', function(e) {
+                const row = e.target.closest('tr');
+                if (row && row.querySelector('td')) {
+                    const stockCode = row.querySelector('td:first-child')?.textContent?.trim();
+                    const stockName = row.querySelector('td:nth-child(2)')?.textContent?.trim();
+                    if (stockCode && stockName) {
+                        row.classList.add('stock-row');
+                        row.setAttribute('data-stock-code', stockCode);
+                        handleStockRowClick(stockCode, stockName);
+                    }
+                }
+            });
+        });
 
     </script>
 </body>

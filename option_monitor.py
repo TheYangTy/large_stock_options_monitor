@@ -28,7 +28,7 @@ from utils.logger import setup_logger
 from utils.notifier import Notifier
 from utils.data_handler import DataHandler
 from utils.mac_notifier import MacNotifier
-from utils.big_options_processor import BigOptionsProcessor
+from utils.big_options_processor import BigOptionsProcessor, retry_on_api_error
 
 
 class OptionMonitor:
@@ -339,6 +339,7 @@ class OptionMonitor:
             self.logger.error(f"订阅股票报价异常: {e}")
             self.logger.error(traceback.format_exc())
     
+    @retry_on_api_error
     def get_stock_price(self, stock_code: str) -> float:
         """获取股票当前价格（优先使用缓存）"""
         try:
@@ -437,6 +438,7 @@ class OptionMonitor:
             
             return 100.0  # 默认价格
     
+    @retry_on_api_error
     def get_stock_options(self, stock_code: str) -> List[str]:
         """获取指定股票的期权合约列表"""
         try:
@@ -516,6 +518,7 @@ class OptionMonitor:
             return []
 
     
+    @retry_on_api_error
     def get_option_trades(self, option_code: str) -> Optional[pd.DataFrame]:
         """获取期权逐笔交易数据"""
         try:

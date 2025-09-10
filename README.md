@@ -1,25 +1,9 @@
 # 港股期权大单监控系统
 
 基于Futu OpenD的港股期权大单监控系统，支持企微机器人推送、交易量变化检测和股票名称显示。
-
-## 最近更新
-
-- 基础信息独立存储
-  - 新增 data/stock_base_info.json 专门保存股票名称等“基本不变字段”
-  - 合并策略：仅用非空值更新，避免 API 失败导致名称等被清空
-- 价格与缓存
-  - get_stock_price 优先用内存缓存；行情失败时回退读取 data/stock_prices.json 的最近报价，统一返回 float
-  - stock_prices.json 写入采用统一 dict 结构，包含 price/name/turnover/volume/update_time
-- 订阅增强
-  - 股票改为同时订阅 QUOTE + SNAPSHOT，确保能拿到成交额/量
-  - 订阅后自动校验并对缺失股票进行一次“补订”
-  - /api/status 返回 subscribed_stocks 与 missing_subscriptions 便于核查覆盖
-- Web 面板
-  - 移除“四个汇总格子”与“测试企微推送/强制推送大单”按钮
-  - 列表排序：按固定股票顺序分组，组内按成交量(volume)降序、再按成交额(turnover)降序，并加入股票代码作为次级键，保证稳定
-  - 成交额占比(%) 着色：占比>0.01% 且 Call 标绿，>0.01% 且 Put 标红，其余标黑
-- 成交额缺失补齐
-  - 接口端先从缓存补齐，若缺失则调用行情补齐；仍缺时 sleep 10s 后再次读取缓存回填（本次请求可能多等待约10秒）
+把压箱底的好东西分享出来，希望各位大佬赚钱后赏个鸡腿🍗，谢谢！
+WX：altenli
+支持付费咨询&部署
 
 ## 🚀 功能特点
 
@@ -166,7 +150,6 @@ pip install -r requirements.txt
 
 ## 💖 赞助 (Sponsor)
 
-新人第一次做开源，希望各位大佬赏个鸡腿🍗，谢谢！
 
 <details>
 <summary>展开查看微信 / 支付宝打赏二维码</summary>

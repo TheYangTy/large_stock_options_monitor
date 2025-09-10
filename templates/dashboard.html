@@ -104,8 +104,10 @@
                                     <div class="fw-semibold mb-2">筛选</div>
                                     <div class="d-flex gap-3 flex-wrap align-items-end">
                                         <div>
-                                            <label for="stockMultiSelect" class="form-label">股票（单选）</label>
-                                            <select id="stockMultiSelect" multiple size="6" class="form-select" style="min-width:280px;"></select>
+                                            <label for="stockSelect" class="form-label">股票（单选）</label>
+                                            <select id="stockSelect" class="form-select" style="min-width:280px;">
+                                                <option value="">全部</option>
+                                            </select>
                                         </div>
                                         <div>
                                             <label class="form-label d-block">仅看成交额占比 > 0.01%</label>
@@ -173,7 +175,7 @@
         let refreshTimer;
 
         // 筛选器状态
-        let selectedStocks = new Set();
+        let selectedStock = '';
 
         // 应用筛选：根据已选的代码/名称过滤
         function applyFilters(arr) {

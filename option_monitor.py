@@ -17,8 +17,6 @@ import os
 # 第三方库
 try:
     import futu as ft
-    import akshare as ak
-    import tushare as ts
     import json
 except ImportError as e:
     print(f"请安装必要的依赖包: {e}")

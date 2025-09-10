@@ -10,10 +10,34 @@ import pandas as pd
 import time
 import traceback
 import re
+import functools
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Callable
 from config import DATA_CONFIG, MONITOR_TIME, OPTION_FILTER
 import futu as ft
+
+
+def retry_on_api_error(max_retries: int = 3):
+    """API调用失败时的重试装饰器，重试间隔5秒"""
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            logger = logging.getLogger('OptionMonitor.BigOptionsProcessor')
+            retries = 0
+            while retries < max_retries:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    retries += 1
+                    if retries >= max_retries:
+                        logger.error(f"API调用失败，已重试{retries}次，放弃: {e}")
+                        raise
+                    logger.warning(f"API调用失败，{retries}/{max_retries}次重试: {e}")
+                    time.sleep(5)  # 重试前等待5秒
+                    logger.info(f"正在进行第{retries}次重试...")
+            return func(*args, **kwargs)  # 最后一次尝试
+        return wrapper
+    return decorator
 
 
 class BigOptionsProcessor:
@@ -120,7 +144,7 @@ class BigOptionsProcessor:
                             # 如果连续错误超过3次，跳过剩余期权
                             if error_count >= 3:
                                 self.logger.warning(f"连续错误超过3次，跳过{stock_code}剩余期权")
-                                break
+                                continue
                                 
                             option_big_trades = self._get_option_big_trades(quote_ctx, option_code, stock_code, option_monitor)
                             if option_big_trades:
@@ -195,6 +219,7 @@ class BigOptionsProcessor:
         
         return all_big_options
     
+    @retry_on_api_error(max_retries=3)
     def _batch_get_stock_prices(self, quote_ctx, stock_codes: List[str], option_monitor=None) -> Dict[str, Dict[str, Any]]:
         """批量获取股票价格和名称 - 优先使用option_monitor中的股价缓存"""
         result = {}
@@ -317,6 +342,7 @@ class BigOptionsProcessor:
         
         return result
     
+    @retry_on_api_error(max_retries=3)
     def get_stock_price(self, quote_ctx, stock_code: str, option_monitor=None) -> Dict[str, Any]:
         """获取股票当前价格和名称（带缓存）- 优先使用option_monitor中的股价缓存"""
         try:
@@ -460,6 +486,7 @@ class BigOptionsProcessor:
         
         return big_options
     
+    @retry_on_api_error(max_retries=3)
     def _get_option_codes(self, quote_ctx, stock_code: str, option_monitor=None) -> List[str]:
         """获取期权代码列表"""
         try:
@@ -661,24 +688,24 @@ class BigOptionsProcessor:
                             self.logger.warning(f"获取 {stock_code} 的所有期权失败: ret={ret_all}")
                             # 如果获取失败，直接返回已有的期权代码（可能为空）
                             return option_codes
-                            
-                            # 筛选执行价格在范围内的期权
-                            filtered_all = all_options[
-                                (all_options['strike_price'] >= price_lower) & 
-                                (all_options['strike_price'] <= price_upper)
-                            ]
-                            
-                            if not filtered_all.empty:
-                                self.logger.info(f"筛选出 {len(filtered_all)} 个在价格范围内的期权")
-                                option_codes.extend(filtered_all['code'].tolist())
-                            else:
-                                self.logger.info(f"没有在价格范围内的期权，尝试获取最接近的期权")
-                                # 计算与当前价格的差距
-                                all_options['price_diff'] = abs(all_options['strike_price'] - current_price)
-                                # 获取最接近的10个期权
-                                closest_options = all_options.nsmallest(10, 'price_diff')
-                                option_codes.extend(closest_options['code'].tolist())
-                                self.logger.info(f"添加 {len(closest_options)} 个最接近当前价格的期权")
+                        
+                        # 筛选执行价格在范围内的期权
+                        filtered_all = all_options[
+                            (all_options['strike_price'] >= price_lower) & 
+                            (all_options['strike_price'] <= price_upper)
+                        ]
+                        
+                        if not filtered_all.empty:
+                            self.logger.info(f"筛选出 {len(filtered_all)} 个在价格范围内的期权")
+                            option_codes.extend(filtered_all['code'].tolist())
+                        else:
+                            self.logger.info(f"没有在价格范围内的期权，尝试获取最接近的期权")
+                            # 计算与当前价格的差距
+                            all_options['price_diff'] = abs(all_options['strike_price'] - current_price)
+                            # 获取最接近的10个期权
+                            closest_options = all_options.nsmallest(10, 'price_diff')
+                            option_codes.extend(closest_options['code'].tolist())
+                            self.logger.info(f"添加 {len(closest_options)} 个最接近当前价格的期权")
                     except Exception as all_err:
                         self.logger.error(f"尝试获取所有期权失败: {all_err}")
                 
@@ -697,6 +724,7 @@ class BigOptionsProcessor:
             self.logger.error(f"获取{stock_code}期权代码失败: {e}")
             return []
     
+    @retry_on_api_error(max_retries=3)
     def _get_option_big_trades(self, quote_ctx, option_code: str, stock_code: str, option_monitor=None) -> List[Dict[str, Any]]:
         """获取期权大单交易 - 可选使用option_monitor中的股价缓存"""
         try:

@@ -181,8 +181,8 @@
         function applyFilters(arr) {
             try {
                 let data = Array.isArray(arr) ? arr : [];
-                if (selectedStocks.size > 0) {
-                    data = data.filter(o => o && (selectedStocks.has(String(o.stock_code)) || selectedStocks.has(String(o.stock_name))));
+                if (selectedStock && selectedStock !== '') {
+                    data = data.filter(o => o && (String(o.stock_code) === selectedStock || String(o.stock_name) === selectedStock));
                 }
                 return data;
             } catch (e) {
@@ -191,14 +191,14 @@
             }
         }
 
-        // 构建筛选控件：填充多选下拉与按钮事件（仅初始化一次）
+        // 构建筛选控件：填充单选下拉与按钮事件（仅初始化一次）
         function buildFilters(bigOptions) {
             try {
-                const sel = document.getElementById('stockMultiSelect');
+                const sel = document.getElementById('stockSelect');
                 if (!sel) return;
 
                 // 首次或无选项时填充
-                if (!sel.dataset.inited || sel.options.length === 0) {
+                if (!sel.dataset.inited || sel.options.length <= 1) {
                     const map = new Map();
                     (bigOptions || []).forEach(o => {
                         const code = (o && o.stock_code) ? String(o.stock_code) : '';
@@ -210,7 +210,12 @@
                         const nb = b[1] || b[0];
                         return na.localeCompare(nb);
                     });
+                    
+                    // 保留第一个"全部"选项
+                    const allOption = sel.options[0];
                     sel.innerHTML = '';
+                    sel.appendChild(allOption);
+                    
                     for (const [code, name] of entries) {
                         const opt = document.createElement('option');
                         opt.value = code;
@@ -227,16 +232,26 @@
                 if (btnApply && !btnApply.dataset.bound) {
                     btnApply.dataset.bound = '1';
                     btnApply.addEventListener('click', () => {
+                        selectedStock = sel.value;
                         loadBigOptionsSummary(false);
                     });
                 }
                 if (btnClear && !btnClear.dataset.bound) {
                     btnClear.dataset.bound = '1';
                     btnClear.addEventListener('click', () => {
-                        Array.from(sel.options).forEach(o => o.selected = false);
+                        sel.value = ''; // 选择"全部"选项
+                        selectedStock = '';
                         const no = document.getElementById('ratioNo');
                         if (no) no.checked = true;
                         loadBigOptionsSummary(false);
+                    });
+                }
+                
+                // 添加下拉框变化事件
+                if (!sel.dataset.eventBound) {
+                    sel.dataset.eventBound = '1';
+                    sel.addEventListener('change', () => {
+                        selectedStock = sel.value;
                     });
                 }
             } catch (e) {
@@ -376,13 +391,16 @@
         
         // 加载大单期权汇总数据
         function loadBigOptionsSummary(isFirstLoad = false) {
-            // 读取筛选参数：多选股票与占比过滤
-            const selectedCodes = Array.from(document.querySelectorAll('#stockMultiSelect option:checked')).map(o => o.value).filter(Boolean);
+            // 读取筛选参数：单选股票与占比过滤
+            const stockSelect = document.getElementById('stockSelect');
+            const selectedCode = stockSelect ? stockSelect.value : '';
+            selectedStock = selectedCode; // 更新全局变量
+            
             const onlyBigRatio = document.querySelector('input[name="ratioFilter"]:checked')?.value === 'yes';
 
             const params = new URLSearchParams();
             if (isFirstLoad) params.set('first_load', 'true');
-            if (selectedCodes.length) params.set('stock_codes', selectedCodes.join(','));
+            if (selectedCode) params.set('stock_codes', selectedCode);
             if (onlyBigRatio) params.set('only_big_ratio', 'true');
 
             const url = `/api/big_options_summary?${params.toString()}`;

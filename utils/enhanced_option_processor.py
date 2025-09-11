@@ -94,7 +94,7 @@ class EnhancedOptionProcessor:
 📈 类型: {option_data.get('option_type', 'Unknown')}
 🔄 方向: {option_data.get('direction', 'Unknown')}
 💰 价格: {option_data.get('price', 0):.2f} 港币
-📦 数量: {option_data.get('volume', 0)} 手
+📦 数量: {option_data.get('volume', 0)} 张
 💵 金额: {option_data.get('turnover', 0):,.0f} 港币
 ⚠️ 风险: {option_data.get('risk_level', 'Unknown')}
 ⭐ 重要性: {option_data.get('importance_score', 0)}/10

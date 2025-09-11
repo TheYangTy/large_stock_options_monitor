@@ -73,9 +73,9 @@ class Notifier:
 
         # 格式化变化量显示
         if volume_diff > 0:
-            diff_display = f"变化量: +{volume_diff} 手 (上次: {last_volume})\n"
+            diff_display = f"变化量: +{volume_diff} 张 (上次: {last_volume})\n"
         elif volume_diff < 0:
-            diff_display = f"变化量: {volume_diff} 手 (上次: {last_volume})\n"
+            diff_display = f"变化量: {volume_diff} 张 (上次: {last_volume})\n"
         else:
             diff_display = f"变化量: 无变化 (当前: {trade_info.get('volume', 0)})\n"
 
@@ -196,7 +196,7 @@ class Notifier:
             
             title = f"期权大单 - {stock_display}"
             subtitle = f"{trade_info['option_code']}"
-            message = (f"成交量: {trade_info['volume']:,}手\n"
+            message = (f"成交量: {trade_info['volume']:,}张\n"
                       f"成交额: {trade_info['turnover']/10000:.1f}万港币")
             
             self.mac_notifier.send_notification(title, message, subtitle)

@@ -92,9 +92,9 @@ class WeWorkNotifier:
             
             # 格式化变化量显示
             if volume_diff > 0:
-                diff_display = f"📈 变化: +{volume_diff} 手 (上次: {last_volume})"
+                diff_display = f"📈 变化: +{volume_diff} 张 (上次: {last_volume})"
             elif volume_diff < 0:
-                diff_display = f"📉 变化: {volume_diff} 手 (上次: {last_volume})"
+                diff_display = f"📉 变化: {volume_diff} 张 (上次: {last_volume})"
             else:
                 diff_display = f"📊 变化: 无变化 (当前: {option_data.get('volume', 0)})"
 
@@ -104,7 +104,7 @@ class WeWorkNotifier:
 📈 类型: {option_type}
 🔄 方向: {direction}
 💰 价格: {option_data.get('price', 0):.2f} 港币
-📦 数量: {option_data.get('volume', 0)} 手
+📦 数量: {option_data.get('volume', 0)} 张
 💵 金额: {option_data.get('turnover', 0):,.0f} 港币
 {diff_display}
 ⏰ 时间: {option_data.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))}"""
@@ -240,13 +240,13 @@ class WeWorkNotifier:
                     # 添加变化量信息
                     volume_diff = trade.get('volume_diff', 0)
                     if volume_diff > 0:
-                        diff_text = f", +{volume_diff}手"
+                        diff_text = f", +{volume_diff}张"
                     elif volume_diff < 0:
-                        diff_text = f", {volume_diff}手"
+                        diff_text = f", {volume_diff}张"
                     else:
                         diff_text = ""
                     
-                    content += f"\n  {i}. {trade.get('option_code', '')}: {option_type}{direction_display}, {price:.3f}×{volume}手{diff_text}, {turnover/10000:.1f}万"
+                    content += f"\n  {i}. {trade.get('option_code', '')}: {option_type}{direction_display}, {price:.3f}×{volume}张{diff_text}, {turnover/10000:.1f}万"
             
             # 获取需要标记为已推送的ID，但不立即更新缓存
             option_ids = [trade.get('_id') for trade in new_trades if '_id' in trade]

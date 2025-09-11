@@ -925,7 +925,7 @@ class BigOptionsProcessor:
                         
                         self.logger.info(f"🔥 发现大单期权: {option_code}")
                         self.logger.info(f"   执行价格: {strike_price:.2f}, 类型: {option_type}{direction_display}")
-                        self.logger.info(f"   成交量: {current_volume:,}手, 成交额: {current_turnover:,.0f}港币")
+                        self.logger.info(f"   成交量: {current_volume:,}张, 成交额: {current_turnover:,.0f}港币")
                         self.logger.info(f"   当前价格: {row.get('last_price', 0):.4f}, 涨跌幅: {row.get('change_rate', 0):+.2f}%")
                 
             except Exception as e:
@@ -1007,7 +1007,7 @@ class BigOptionsProcessor:
                             
                             self.logger.info(f"📊 报价回退发现大单: {option_code}")
                             self.logger.info(f"   执行价格: {option_info.get('strike_price', 0):.2f}, 类型: {option_info.get('option_type', '未知')}{direction_display}")
-                            self.logger.info(f"   成交量: {volume2:,}手, 成交额: {turnover2:,.0f}港币")
+                            self.logger.info(f"   成交量: {volume2:,}张, 成交额: {turnover2:,.0f}港币")
                 except Exception as e:
                     self.logger.debug(f"报价回退失败: {e}")
             

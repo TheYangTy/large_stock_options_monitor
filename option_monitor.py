@@ -12,6 +12,7 @@ from typing import List, Dict, Optional
 import threading
 import signal
 import sys
+import re
 import os
 
 # 第三方库
@@ -1009,25 +1010,16 @@ class OptionMonitor:
     
     def _parse_option_type(self, option_code: str) -> str:
         """解析期权类型 (Call/Put)"""
-        import re
-        
         if not option_code:
             return "Unknown"
-        
+
         try:
             if option_code.startswith('HK.'):
                 code_part = option_code[3:]  # 去掉 HK.
-                # 优先：匹配末尾的 C/P+数字模式
-                m = re.search(r'([CP])(\d+)$', code_part)
+                # 规则：匹配两段数字之间的单个 C 或 P，例如 ...250929P102500
+                m = re.search(r'\d+([CP])\d+', code_part)
                 if m:
-                    return 'Call (看涨)' if m.group(1) == 'C' else 'Put (看跌)'
-                
-                # 回退：比较最后一次出现的 C 与 P 的位置
-                c_pos = code_part.rfind('C')
-                p_pos = code_part.rfind('P')
-                if c_pos == -1 and p_pos == -1:
-                    return 'Unknown'
-                return 'Call (看涨)' if c_pos > p_pos else 'Put (看跌)'
+                    return 'Call' if m.group(1) == 'C' else 'Put'
         except Exception as e:
             self.logger.debug(f"解析期权类型失败: {e}")
         

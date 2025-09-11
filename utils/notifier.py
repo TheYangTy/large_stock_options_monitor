@@ -222,10 +222,10 @@ class Notifier:
                 if isinstance(code, str) and code.startswith('HK.'):
                     code_part = code[3:]
                     import re as _re
-                    m = _re.search(r'([CP])(\d+)$', code_part)
+                    m = _re.search(r'\d+([CP])\d+', code_part)
                     if m:
                         opt_type = 'Call' if m.group(1) == 'C' else 'Put'
-                        opt_type_text = 'Call (看涨)' if opt_type == 'Call' else 'Put (看跌)'
+                        opt_type_text = 'Call' if opt_type == 'Call' else 'Put'
                 # 写入期权类型字段
                 if opt_type:
                     trade_info['option_type'] = opt_type

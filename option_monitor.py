@@ -991,9 +991,9 @@ class OptionMonitor:
                 # 添加变化量信息
                 volume_diff = opt.get('volume_diff', 0)
                 if volume_diff > 0:
-                    diff_text = f", +{volume_diff}手"
+                    diff_text = f", +{volume_diff}张"
                 elif volume_diff < 0:
-                    diff_text = f", {volume_diff}手"
+                    diff_text = f", {volume_diff}张"
                 else:
                     diff_text = ""
                 
@@ -1003,13 +1003,15 @@ class OptionMonitor:
                 
                 print(
                     f"   {i}. {opt.get('option_code', 'N/A')}: {option_type}{direction_display}, "
-                    f"{price:.3f}×{volume}手{diff_text}, {turnover/10000:.1f}万{time_suffix}"
+                    f"{price:.3f}×{volume}张{diff_text}, {turnover/10000:.1f}万{time_suffix}"
                 )
         
         print("="*60 + "\n")
     
     def _parse_option_type(self, option_code: str) -> str:
         """解析期权类型 (Call/Put)"""
+        import re
+        
         if not option_code:
             return "Unknown"
 
@@ -1019,7 +1021,7 @@ class OptionMonitor:
                 # 规则：匹配两段数字之间的单个 C 或 P，例如 ...250929P102500
                 m = re.search(r'\d+([CP])\d+', code_part)
                 if m:
-                    return 'Call' if m.group(1) == 'C' else 'Put'
+                    return 'Call (看涨)' if m.group(1) == 'C' else 'Put (看跌)'
         except Exception as e:
             self.logger.debug(f"解析期权类型失败: {e}")
         

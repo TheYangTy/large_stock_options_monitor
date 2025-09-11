@@ -98,6 +98,8 @@
             background-color: rgba(13, 110, 253, 0.1);
         }
     </style>
+    <!-- 引入Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <div class="container-fluid">
@@ -538,6 +540,13 @@
                         row.innerHTML = '<td colspan="13" class="text-center text-muted">暂无大单期权数据</td>';
                         tableBody.appendChild(row);
                     }
+
+                    // 构建/更新图表
+                    try {
+                        buildAndRenderCharts(allData || []);
+                    } catch (e) {
+                        console.error('构建图表失败:', e);
+                    }
                 })
                 .catch(error => {
                     console.error('获取数据失败:', error);
@@ -592,6 +601,210 @@
             });
         });
 
+        // ================= 图表：分时趋势 + 到期分布 =================
+        let intradayChart = null;
+        let expiryChart = null;
+
+        function buildAndRenderCharts(options) {
+            // 聚合分时数据（按分钟）
+            const byMinute = new Map();
+            const byExpiry = new Map();
+
+            (options || []).forEach(o => {
+                try {
+                    // 分时：时间戳到分钟
+                    if (o && o.timestamp) {
+                        const d = new Date(o.timestamp);
+                        if (!isNaN(d.getTime())) {
+                            const key = d.getFullYear() + '-' +
+                                        String(d.getMonth()+1).padStart(2,'0') + '-' +
+                                        String(d.getDate()).padStart(2,'0') + ' ' +
+                                        String(d.getHours()).padStart(2,'0') + ':' +
+                                        String(d.getMinutes()).padStart(2,'0');
+                            if (!byMinute.has(key)) byMinute.set(key, { count: 0, turnover: 0 });
+                            const m = byMinute.get(key);
+                            m.count += 1;
+                            const to = Number(o.turnover || 0);
+                            if (!Number.isNaN(to)) m.turnover += to;
+                        }
+                    }
+                    // 到期分布：优先使用字段 expiry_date，否则从option_code解析
+                    let expiry = '';
+                    if (o && o.expiry_date) {
+                        expiry = String(o.expiry_date);
+                    } else if (o && o.option_code) {
+                        const parsed = (function(code){
+                            try{
+                                const s = String(code).toUpperCase().replace(/^HK\./, '');
+                                const pos = Math.max(s.indexOf('C'), s.indexOf('P'));
+                                if (pos > 5) {
+                                    const y = 2000 + parseInt(s.substring(pos-6, pos-4));
+                                    const m = parseInt(s.substring(pos-4, pos-2));
+                                    const d = parseInt(s.substring(pos-2, pos));
+                                    if (y && m && d) {
+                                        return y + '-' + String(m).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+                                    }
+                                }
+                            }catch(e){}
+                            return '';
+                        })(o.option_code);
+                        expiry = parsed || '';
+                    }
+                    if (expiry) {
+                        if (!byExpiry.has(expiry)) byExpiry.set(expiry, { count: 0, turnover: 0 });
+                        const e = byExpiry.get(expiry);
+                        e.count += 1;
+                        const to2 = Number(o.turnover || 0);
+                        if (!Number.isNaN(to2)) e.turnover += to2;
+                    }
+                } catch(_) {}
+            });
+
+            // 分时数据整理（按时间排序）
+            const minuteLabels = Array.from(byMinute.keys()).sort();
+            const minuteCounts = minuteLabels.map(k => byMinute.get(k).count);
+            const minuteTurnoverWan = minuteLabels.map(k => Number((byMinute.get(k).turnover / 10000).toFixed(1)));
+
+            // 到期分布（按日期升序）
+            const expiryLabels = Array.from(byExpiry.keys()).sort();
+            const expiryCounts = expiryLabels.map(k => byExpiry.get(k).count);
+            const expiryTurnoverWan = expiryLabels.map(k => Number((byExpiry.get(k).turnover / 10000).toFixed(1)));
+
+            // 初始化/更新图表
+            renderOrUpdateCharts(minuteLabels, minuteCounts, minuteTurnoverWan, expiryLabels, expiryCounts, expiryTurnoverWan);
+        }
+
+        function renderOrUpdateCharts(mLabels, mCounts, mTurnover, eLabels, eCounts, eTurnover) {
+            // 确保容器存在（不存在则创建）
+            ensureChartContainers();
+
+            const intradayCtx = document.getElementById('intradayChart')?.getContext('2d');
+            const expiryCtx = document.getElementById('expiryChart')?.getContext('2d');
+
+            if (!intradayCtx || !expiryCtx || typeof Chart === 'undefined') return;
+
+            // 分时趋势：双轴（数量-柱状，成交额-折线）
+            const intradayConfig = {
+                type: 'bar',
+                data: {
+                    labels: mLabels,
+                    datasets: [
+                        {
+                            type: 'bar',
+                            label: '大单笔数',
+                            data: mCounts,
+                            backgroundColor: 'rgba(13,110,253,0.5)',
+                            borderColor: 'rgba(13,110,253,1)',
+                            borderWidth: 1,
+                            yAxisID: 'y'
+                        },
+                        {
+                            type: 'line',
+                            label: '成交额(万)',
+                            data: mTurnover,
+                            borderColor: 'rgba(25,135,84,1)',
+                            backgroundColor: 'rgba(25,135,84,0.2)',
+                            tension: 0.3,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: { mode: 'index', intersect: false }
+                    },
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
+                        y: { position: 'left', title: { display: true, text: '笔数' } },
+                        y1: { position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '成交额(万)' } }
+                    }
+                }
+            };
+
+            // 到期分布：双轴（数量-柱状，成交额-折线）
+            const expiryConfig = {
+                type: 'bar',
+                data: {
+                    labels: eLabels,
+                    datasets: [
+                        {
+                            type: 'bar',
+                            label: '大单笔数',
+                            data: eCounts,
+                            backgroundColor: 'rgba(102,16,242,0.4)',
+                            borderColor: 'rgba(102,16,242,1)',
+                            borderWidth: 1,
+                            yAxisID: 'y'
+                        },
+                        {
+                            type: 'line',
+                            label: '成交额(万)',
+                            data: eTurnover,
+                            borderColor: 'rgba(220,53,69,1)',
+                            backgroundColor: 'rgba(220,53,69,0.2)',
+                            tension: 0.3,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: { mode: 'index', intersect: false }
+                    },
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        x: { ticks: { autoSkip: true, maxTicksLimit: 10 } },
+                        y: { position: 'left', title: { display: true, text: '笔数' } },
+                        y1: { position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '成交额(万)' } }
+                    }
+                }
+            };
+
+            // 销毁旧实例
+            if (intradayChart) { intradayChart.destroy(); }
+            if (expiryChart) { expiryChart.destroy(); }
+
+            intradayChart = new Chart(intradayCtx, intradayConfig);
+            expiryChart = new Chart(expiryCtx, expiryConfig);
+        }
+
+        function ensureChartContainers() {
+            let container = document.getElementById('charts-container');
+            if (!container) {
+                const main = document.querySelector('.container-fluid .card-body');
+                if (!main) return;
+
+                container = document.createElement('div');
+                container.id = 'charts-container';
+                container.className = 'mt-4';
+
+                container.innerHTML = `
+                <div class="row">
+                    <div class="col-12 col-lg-7">
+                        <div class="card">
+                            <div class="card-header">分时趋势（大单笔数/成交额）</div>
+                            <div class="card-body">
+                                <canvas id="intradayChart" height="200"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-lg-5">
+                        <div class="card">
+                            <div class="card-header">到期分布（笔数/成交额）</div>
+                            <div class="card-body">
+                                <canvas id="expiryChart" height="200"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+                main.appendChild(container);
+            }
+        }
     </script>
 </body>
 </html>

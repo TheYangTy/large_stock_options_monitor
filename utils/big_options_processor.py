@@ -12,16 +12,19 @@ import traceback
 import re
 import functools
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Dict, List, Optional, Callable, TypeVar, ParamSpec
 from config import DATA_CONFIG, MONITOR_TIME, OPTION_FILTER
 import futu as ft
 
 
-def retry_on_api_error(max_retries: int = 3):
-    """API调用失败时的重试装饰器，重试间隔5秒"""
-    def decorator(func: Callable):
+P = ParamSpec("P")
+R = TypeVar("R")
+
+def retry_on_api_error(max_retries: int = 3, *, delay: float = 5.0) -> Callable[[Callable[P, R]], Callable[P, R]]:
+    """API调用失败时的重试装饰器，默认重试间隔5秒"""
+    def decorator(func: Callable[P, R]) -> Callable[P, R]:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             logger = logging.getLogger('OptionMonitor.BigOptionsProcessor')
             retries = 0
             while retries < max_retries:
@@ -33,9 +36,10 @@ def retry_on_api_error(max_retries: int = 3):
                         logger.error(f"API调用失败，已重试{retries}次，放弃: {e}")
                         raise
                     logger.warning(f"API调用失败，{retries}/{max_retries}次重试: {e}")
-                    time.sleep(5)  # 重试前等待5秒
+                    time.sleep(delay)  # 使用可配置的重试间隔
                     logger.info(f"正在进行第{retries}次重试...")
-            return func(*args, **kwargs)  # 最后一次尝试
+            # 理论上不会到这里；为安全起见最后再尝试一次
+            return func(*args, **kwargs)
         return wrapper
     return decorator
 

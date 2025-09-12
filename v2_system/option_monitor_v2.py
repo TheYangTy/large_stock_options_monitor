@@ -250,9 +250,10 @@ class V2OptionMonitor:
                 self.data_handler.save_option_data(big_options_with_diff)
                 self.big_options_processor.save_big_options_summary(big_options_with_diff)
                 
-                # 发送一次汇总通知（包含所有有变化的股票）
+                # 发送一次合并的汇总通知（包含所有有变化的股票）
                 if big_options_with_diff:
-                    self._send_consolidated_report(big_options_with_diff)
+                    # 使用V1风格的汇总报告，将所有股票合并在一个通知中
+                    self.notifier.send_v1_style_summary_report(big_options_with_diff)
                 
                 # 更新历史数据
                 self.previous_options = big_options_with_diff
@@ -482,14 +483,10 @@ class V2OptionMonitor:
             self.previous_options = []
     
     def compare_with_previous_options(self, current_options: List[Dict]) -> List[Dict]:
-        """与历史期权数据比较，计算增量"""
+        """与数据库中今日数据比较，计算增量"""
         try:
-            # 构建历史数据索引
-            previous_index = {}
-            for opt in self.previous_options:
-                key = opt.get('option_code', '')
-                if key:
-                    previous_index[key] = opt
+            # 从数据库获取今日所有期权的最新成交量
+            today_volumes = self.data_handler.db_manager.get_today_all_option_volumes()
             
             # 计算当前数据的增量
             options_with_diff = []
@@ -497,19 +494,15 @@ class V2OptionMonitor:
                 option_code = current_opt.get('option_code', '')
                 current_volume = current_opt.get('volume', 0)
                 
-                # 查找历史数据
-                previous_opt = previous_index.get(option_code)
-                if previous_opt:
-                    previous_volume = previous_opt.get('volume', 0)
-                    volume_diff = current_volume - previous_volume
-                else:
-                    # 新期权
-                    previous_volume = 0
-                    volume_diff = current_volume
+                # 从数据库获取今日该期权的最新成交量
+                today_latest_volume = today_volumes.get(option_code, 0)
+                
+                # 计算成交量差值
+                volume_diff = current_volume - today_latest_volume
                 
                 # 添加增量信息
                 opt_with_diff = current_opt.copy()
-                opt_with_diff['last_volume'] = previous_volume
+                opt_with_diff['last_volume'] = today_latest_volume
                 opt_with_diff['volume_diff'] = volume_diff
                 
                 # 只保留有变化的期权（新增或成交量增加）

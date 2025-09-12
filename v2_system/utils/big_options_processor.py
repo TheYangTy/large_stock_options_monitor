@@ -248,7 +248,7 @@ class BigOptionsProcessor:
         # 按成交额降序排序
         all_big_options.sort(key=lambda x: x.get('turnover', 0), reverse=True)
         
-        # 为每个期权添加正股价格和名称信息
+        # 为每个期权添加正股价格和名称信息，并保存股票信息到数据库
         for option in all_big_options:
             stock_code = option.get('stock_code')
             if stock_code and stock_code in stock_prices:
@@ -256,6 +256,18 @@ class BigOptionsProcessor:
                 if isinstance(stock_info, dict):
                     option['stock_price'] = stock_info.get('price', 0)
                     option['stock_name'] = stock_info.get('name', '')
+                    
+                    # 保存股票信息到数据库
+                    try:
+                        from .database_manager import get_database_manager
+                        db_manager = get_database_manager()
+                        db_manager.save_stock_info(
+                            stock_code=stock_code,
+                            stock_name=stock_info.get('name', ''),
+                            current_price=stock_info.get('price', 0)
+                        )
+                    except Exception as e:
+                        self.logger.debug(f"V2保存股票信息到数据库失败 {stock_code}: {e}")
                 else:
                     option['stock_price'] = stock_info
         
@@ -323,6 +335,9 @@ class BigOptionsProcessor:
                     else:
                         if isinstance(price_obj, (int, float)):
                             actual_price = float(price_obj)
+                            # 当price_obj是数字时，尝试从本地缓存获取名称
+                            if stock_code in self.stock_price_cache and isinstance(self.stock_price_cache[stock_code], dict):
+                                name_from_monitor = self.stock_price_cache[stock_code].get('name', '') or ""
 
                     stock_info = {
                         'price': float(actual_price) if isinstance(actual_price, (int, float)) else 0.0,
@@ -380,6 +395,18 @@ class BigOptionsProcessor:
                     self.stock_price_cache[code] = stock_info
                     self.price_cache_time[code] = current_time
                     self.logger.debug(f"V2获取股票信息: {code} = {price} ({name})")
+                    
+                    # 保存股票信息到数据库
+                    try:
+                        from .database_manager import get_database_manager
+                        db_manager = get_database_manager()
+                        db_manager.save_stock_info(
+                            stock_code=code,
+                            stock_name=name,
+                            current_price=price
+                        )
+                    except Exception as e:
+                        self.logger.debug(f"V2保存股票信息到数据库失败 {code}: {e}")
                 
                 self.logger.info(f"V2成功获取 {len(data)} 只股票的价格和名称")
             else:
@@ -406,18 +433,33 @@ class BigOptionsProcessor:
             
             # 如果提供了option_monitor实例，优先使用其股价缓存
             if option_monitor and hasattr(option_monitor, 'stock_price_cache') and stock_code in option_monitor.stock_price_cache:
-                price = option_monitor.stock_price_cache[stock_code]
+                price_obj = option_monitor.stock_price_cache[stock_code]
+                
+                # 处理不同类型的价格对象
+                if isinstance(price_obj, dict):
+                    price = price_obj.get('price', 0)
+                    name = price_obj.get('name', '')
+                else:
+                    price = price_obj
+                    name = ''
                 
                 stock_info = {
                     'price': price,
-                    'name': ''
+                    'name': name
                 }
                 
-                # 如果本地缓存中有名称信息，补充名称
-                if stock_code in self.stock_price_cache and isinstance(self.stock_price_cache[stock_code], dict):
-                    old_info = self.stock_price_cache[stock_code]
-                    if 'name' in old_info and old_info['name']:
-                        stock_info['name'] = old_info['name']
+                # 如果没有名称，尝试从本地缓存或文件缓存补充
+                if not stock_info['name']:
+                    if stock_code in self.stock_price_cache and isinstance(self.stock_price_cache[stock_code], dict):
+                        old_info = self.stock_price_cache[stock_code]
+                        if 'name' in old_info and old_info['name']:
+                            stock_info['name'] = old_info['name']
+                    
+                    # 如果还是没有名称，尝试从文件缓存获取
+                    if not stock_info['name']:
+                        file_info = self._load_stock_info_from_file(stock_code)
+                        if file_info and file_info.get('name'):
+                            stock_info['name'] = file_info['name']
                 
                 # 更新本地缓存
                 self.stock_price_cache[stock_code] = stock_info
@@ -452,6 +494,18 @@ class BigOptionsProcessor:
                 self.stock_price_cache[stock_code] = stock_info
                 self.price_cache_time[stock_code] = current_time
                 self.logger.debug(f"V2获取股票信息: {stock_code} = {price} ({name})")
+                
+                # 保存股票信息到数据库
+                try:
+                    from .database_manager import get_database_manager
+                    db_manager = get_database_manager()
+                    db_manager.save_stock_info(
+                        stock_code=stock_code,
+                        stock_name=name,
+                        current_price=price
+                    )
+                except Exception as e:
+                    self.logger.debug(f"V2保存股票信息到数据库失败 {stock_code}: {e}")
                 
                 # 如果提供了option_monitor实例，同时更新其缓存
                 if option_monitor and hasattr(option_monitor, 'stock_price_cache'):
@@ -660,9 +714,8 @@ class BigOptionsProcessor:
             
             # 获取期权基本信息
             try:
-                strike_price = self._parse_strike_from_code(option_code)
-                option_type = self._parse_option_type_from_code(option_code)
-                expiry_date = self._parse_expiry_from_code(option_code)
+                # 使用统一的期权代码解析函数
+                strike_price, option_type, expiry_date = self._parse_option_info_from_code(option_code)
                 option_info = {
                     'strike_price': strike_price,
                     'option_type': option_type,
@@ -729,15 +782,15 @@ class BigOptionsProcessor:
                         # 如果API没有返回或为0，使用解析的价格
                         self.logger.debug(f"V2使用解析执行价格: {option_code} = {strike_price}")
                     
-                    # 获取数据库中最后记录的交易量
-                    last_recorded_volume = self._get_last_recorded_volume(option_code)
+                    # 从数据库获取今日该期权的最新成交量进行比较
+                    today_latest_volume = self.db_manager.get_today_option_volume(option_code)
                     
                     # 检查当前数据是否符合大单条件
                     if (current_volume >= BIG_TRADE_CONFIG['min_volume_threshold'] and 
                         current_turnover >= BIG_TRADE_CONFIG['min_turnover_threshold'] and
-                        current_volume != last_recorded_volume):
+                        current_volume != today_latest_volume):
                         
-                        volume_diff = current_volume - last_recorded_volume
+                        volume_diff = current_volume - today_latest_volume
                         
                         # 更新当日成交量缓存
                         self._update_today_volume_cache(option_code, current_volume)
@@ -761,7 +814,7 @@ class BigOptionsProcessor:
                             'price_diff': option_info.get('price_diff', 0),
                             'price_diff_pct': option_info.get('price_diff_pct', 0),
                             'volume_diff': volume_diff,
-                            'last_volume': last_recorded_volume
+                            'last_volume': today_latest_volume
                         }
                         
                         # 获取买卖方向
@@ -844,108 +897,6 @@ class BigOptionsProcessor:
             self.logger.error(f"V2保存大单期权汇总失败: {e}")
             self.logger.error(traceback.format_exc())
     
-    def _parse_strike_from_code(self, option_code: str) -> float:
-        """从期权代码解析执行价格"""
-        try:
-            # 使用统一的期权代码解析器
-            from .option_code_parser import parse_option_code
-            
-            option_info = parse_option_code(option_code)
-            if option_info and option_info.get('strike_price') is not None:
-                strike_price = float(option_info['strike_price'])
-                self.logger.debug(f"V2使用解析器获取执行价格: {option_code} -> {strike_price}")
-                return strike_price
-            
-            # 备用解析方法（已更新逻辑）
-            if option_code.startswith('HK.'):
-                # 格式: HK.TCH250929C680000
-                import re
-                pattern = r'HK\.([A-Z]{2,5})(\d{2})(\d{2})(\d{2})([CP])(\d+)'
-                match = re.match(pattern, option_code)
-                if match:
-                    stock_symbol = match.group(1)  # 股票简称
-                    price_str = match.group(6)     # 获取价格部分
-                    price_int = int(price_str)
-                    
-                    # 根据股票简称和价格范围智能判断
-                    # 高价股列表（通常股价在100港币以上）
-                    high_price_stocks = ['TCH', 'HEX', 'MEI', 'JDC', 'ALI']  # 腾讯、港交所、美团、京东、阿里等
-                    # 中价股列表（通常股价在20-100港币）
-                    mid_price_stocks = ['BIU', 'KUA', 'ZMI']  # 小米、快手等
-                    
-                    if stock_symbol in high_price_stocks:
-                        # 高价股：通常6位数除以1000，5位数除以100
-                        if len(price_str) >= 6:
-                            strike_price = float(price_int) / 1000.0
-                        else:
-                            strike_price = float(price_int) / 100.0
-                    elif stock_symbol in mid_price_stocks:
-                        # 中价股：6位数可能除以10000，5位数除以1000
-                        if len(price_str) >= 6:
-                            strike_price = float(price_int) / 10000.0
-                        else:
-                            strike_price = float(price_int) / 1000.0
-                    else:
-                        # 未知股票，根据数值大小智能判断
-                        if len(price_str) >= 6:
-                            if price_int >= 500000:  # 大于50万，可能是高价股
-                                strike_price = float(price_int) / 1000.0
-                            else:  # 小于50万，可能是低价股
-                                strike_price = float(price_int) / 10000.0
-                        elif len(price_str) >= 5:
-                            if price_int >= 50000:  # 大于5万，除以1000
-                                strike_price = float(price_int) / 1000.0
-                            else:  # 小于5万，除以100
-                                strike_price = float(price_int) / 100.0
-                        else:
-                            # 较短数字，除以100
-                            strike_price = float(price_int) / 100.0
-                    
-                    self.logger.debug(f"V2备用解析执行价格: {option_code} -> {strike_price} (股票: {stock_symbol})")
-                    return strike_price
-                        
-        except Exception as e:
-            self.logger.error(f"V2解析执行价格失败: {e}")
-        return 0.0
-    
-    def _parse_expiry_from_code(self, option_code: str) -> str:
-        """从期权代码解析到期日"""
-        try:
-            if option_code.startswith('HK.'):
-                code_part = option_code[3:]
-                matches = re.findall(r'(\d{6})(?=[CP])', code_part)
-                if matches:
-                    date_part = matches[-1]
-                    year = int('20' + date_part[:2])
-                    month = int(date_part[2:4])
-                    day = int(date_part[4:6])
-                    try:
-                        dt = datetime(year, month, day)
-                        return dt.strftime('%Y-%m-%d')
-                    except ValueError:
-                        return ''
-        except Exception as e:
-            self.logger.error(f"V2解析到期日失败: {e}")
-        return ''
-    
-    def _parse_option_type_from_code(self, option_code: str) -> str:
-        """从期权代码解析类型"""
-        try:
-            if option_code.startswith('HK.'):
-                code_part = option_code[3:]
-                m = re.search(r'\d+([CP])\d+', code_part)
-                if m:
-                    return 'Call' if m.group(1) == 'C' else 'Put'
-                c_pos = code_part.rfind('C')
-                p_pos = code_part.rfind('P')
-                
-                # 使用统一的期权代码解析器
-                from .option_code_parser import get_option_type
-                return get_option_type(option_code)
-        except Exception as e:
-            self.logger.error(f"V2解析期权类型失败: {e}")
-        return '未知'
-
     def _calculate_statistics(self, big_options: List[Dict[str, Any]]) -> Dict[str, Any]:
         """V2系统计算统计信息"""
         if not big_options:
@@ -993,3 +944,84 @@ class BigOptionsProcessor:
         except Exception as e:
             self.logger.error(f"V2加载汇总数据失败: {e}")
             return None
+    
+    def _parse_option_info_from_code(self, option_code: str) -> tuple:
+        """从期权代码统一解析所有信息
+        
+        Args:
+            option_code: 期权代码，格式如 HK.TCH250919C650000
+            
+        Returns:
+            tuple: (strike_price, option_type, expiry_date)
+        """
+        try:
+            import re
+            # 统一正则表达式匹配期权代码格式: HK.XXX250919C650000
+            # 捕获组: 1=股票代码(TCH), 2=日期(250919), 3=类型(C/P), 4=行权价(650000)
+            pattern = r'HK\.([A-Z]{2,5})(\d{6})([CP])(\d+)$'
+            match = re.search(pattern, option_code)
+            
+            if match:
+                stock_symbol = match.group(1)  # TCH
+                date_str = match.group(2)      # 250919
+                option_type_char = match.group(3)  # C或P
+                strike_str = match.group(4)    # 650000
+                
+                # 解析到期日: 250919 -> 2025-09-19
+                try:
+                    year = int('20' + date_str[:2])
+                    month = int(date_str[2:4])
+                    day = int(date_str[4:6])
+                    from datetime import datetime
+                    dt = datetime(year, month, day)
+                    expiry_date = dt.strftime('%Y-%m-%d')
+                except ValueError:
+                    expiry_date = ''
+                
+                # 解析期权类型
+                option_type = 'Call' if option_type_char == 'C' else 'Put'
+                
+                # 解析行权价（智能判断除数）
+                price_int = int(strike_str)
+                
+                # 根据股票简称和价格范围智能判断除数
+                high_price_stocks = ['TCH', 'HEX', 'MEI', 'JDC', 'ALI']  # 腾讯、港交所、美团、京东、阿里等
+                mid_price_stocks = ['MIU', 'KUA', 'ZMI']  # 小米、快手等
+                
+                if stock_symbol in high_price_stocks:
+                    # 高价股：通常6位数除以1000，5位数除以100
+                    if len(strike_str) >= 6:
+                        strike_price = float(price_int) / 1000.0
+                    else:
+                        strike_price = float(price_int) / 100.0
+                elif stock_symbol in mid_price_stocks:
+                    # 中价股：6位数可能除以10000，5位数除以1000
+                    if len(strike_str) >= 6:
+                        strike_price = float(price_int) / 10000.0
+                    else:
+                        strike_price = float(price_int) / 1000.0
+                else:
+                    # 未知股票，根据数值大小智能判断
+                    if len(strike_str) >= 6:
+                        if price_int >= 500000:  # 大于50万，可能是高价股
+                            strike_price = float(price_int) / 1000.0
+                        else:  # 小于50万，可能是低价股
+                            strike_price = float(price_int) / 10000.0
+                    elif len(strike_str) >= 5:
+                        if price_int >= 50000:  # 大于5万，除以1000
+                            strike_price = float(price_int) / 1000.0
+                        else:  # 小于5万，除以100
+                            strike_price = float(price_int) / 100.0
+                    else:
+                        # 较短数字，除以100
+                        strike_price = float(price_int) / 100.0
+                
+                self.logger.debug(f"V2统一解析期权代码: {option_code} -> 执行价:{strike_price}, 类型:{option_type}, 到期:{expiry_date}")
+                return strike_price, option_type, expiry_date
+            else:
+                self.logger.warning(f"期权代码格式不匹配: {option_code}")
+                return 0.0, 'Unknown', ''
+                
+        except Exception as e:
+            self.logger.warning(f"统一解析期权代码失败 {option_code}: {e}")
+            return 0.0, 'Unknown', ''

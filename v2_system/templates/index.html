@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block title %}数据概览 - V2期权监控数据库{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">
+            <i class="bi bi-speedometer2"></i> 数据库概览
+        </h1>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-3 mb-4">
+        <div class="card card-stats h-100 border-primary">
+            <div class="card-body text-center">
+                <i class="bi bi-list-ol text-primary" style="font-size: 2rem;"></i>
+                <h3 class="mt-2 text-primary">{{ stats.total_trades or 0 }}</h3>
+                <p class="card-text">总交易记录</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-4">
+        <div class="card card-stats h-100 border-success">
+            <div class="card-body text-center">
+                <i class="bi bi-calendar-day text-success" style="font-size: 2rem;"></i>
+                <h3 class="mt-2 text-success">{{ stats.today_trades or 0 }}</h3>
+                <p class="card-text">今日交易</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-4">
+        <div class="card card-stats h-100 border-info">
+            <div class="card-body text-center">
+                <i class="bi bi-building text-info" style="font-size: 2rem;"></i>
+                <h3 class="mt-2 text-info">{{ stats.stock_count or 0 }}</h3>
+                <p class="card-text">股票数量</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-4">
+        <div class="card card-stats h-100 border-warning">
+            <div class="card-body text-center">
+                <i class="bi bi-graph-up text-warning" style="font-size: 2rem;"></i>
+                <h3 class="mt-2 text-warning">{{ stats.option_count or 0 }}</h3>
+                <p class="card-text">期权代码</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-cash-stack"></i> 成交金额统计
+                </h5>
+            </div>
+            <div class="card-body">
+                <h4 class="text-success">
+                    {{ "{:,.0f}".format(stats.total_turnover or 0) }} 港币
+                </h4>
+                <p class="text-muted">总成交金额</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-clock-history"></i> 数据时间范围
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if stats.earliest_record and stats.latest_record %}
+                <p><strong>最早记录:</strong> {{ stats.earliest_record[:19] }}</p>
+                <p><strong>最新记录:</strong> {{ stats.latest_record[:19] }}</p>
+                {% else %}
+                <p class="text-muted">暂无数据</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-database"></i> 数据库信息
+                </h5>
+            </div>
+            <div class="card-body">
+                <p><strong>数据库路径:</strong> <code>{{ stats.database_path }}</code></p>
+                <div class="mt-3">
+                    <a href="{{ url_for('trades') }}" class="btn btn-primary me-2">
+                        <i class="bi bi-list-ul"></i> 查看交易记录
+                    </a>
+                    <a href="{{ url_for('stocks') }}" class="btn btn-info">
+                        <i class="bi bi-bar-chart"></i> 查看股票统计
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 自动刷新统计数据
+function refreshStats() {
+    fetch('/api/stats')
+        .then(response => response.json())
+        .then(data => {
+            if (!data.error) {
+                // 更新统计数字
+                document.querySelector('.text-primary h3').textContent = data.total_trades || 0;
+                document.querySelector('.text-success h3').textContent = data.today_trades || 0;
+                document.querySelector('.text-info h3').textContent = data.stock_count || 0;
+                document.querySelector('.text-warning h3').textContent = data.option_count || 0;
+                
+                // 更新成交金额
+                const turnoverElement = document.querySelector('.text-success h4');
+                if (turnoverElement) {
+                    turnoverElement.textContent = new Intl.NumberFormat('zh-CN').format(data.total_turnover || 0) + ' 港币';
+                }
+            }
+        })
+        .catch(error => console.error('刷新统计数据失败:', error));
+}
+
+// 每30秒刷新一次统计数据
+setInterval(refreshStats, 30000);
+</script>
+{% endblock %}

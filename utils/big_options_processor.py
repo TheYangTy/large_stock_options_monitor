@@ -714,13 +714,13 @@ class BigOptionsProcessor:
                         self.logger.error(f"尝试获取所有期权失败: {all_err}")
                 
             except Exception as e:
-                self.logger.debug(f"获取{stock_code}期权到期日失败: {e}")
+                self.logger.error(f"获取{stock_code}期权到期日失败: {e}")
                 return []
             
             if option_codes:
                 self.logger.info(f"{stock_code}获取到{len(option_codes)}个期权合约")
             else:
-                self.logger.debug(f"{stock_code}未找到期权合约")
+                self.logger.error(f"{stock_code}未找到期权合约")
             
             return option_codes
             
@@ -840,9 +840,9 @@ class BigOptionsProcessor:
                             else:
                                 current_stock_price = 100.0
                     except Exception as stock_e:
-                        self.logger.debug(f"获取{stock_code}股价用于对比失败: {stock_e}")
+                        self.logger.error(f"获取{stock_code}股价用于对比失败: {stock_e}")
             except Exception as e:
-                self.logger.debug(f"解析{option_code}基本信息失败: {e}")
+                self.logger.error(f"解析{option_code}基本信息失败: {e}")
             
             # 尝试获取市场快照
             try:
@@ -911,7 +911,7 @@ class BigOptionsProcessor:
                                     direction_text = "中性"
                                 self.logger.debug(f"从get_rt_ticker获取到买卖方向: {direction} ({direction_text})")
                         except Exception as ticker_e:
-                            self.logger.debug(f"获取{option_code}逐笔成交方向失败: {ticker_e}")
+                            self.logger.error(f"获取{option_code}逐笔成交方向失败: {ticker_e}")
                         
                         # 添加方向到交易信息
                         trade_info['direction'] = direction
@@ -929,7 +929,7 @@ class BigOptionsProcessor:
                         self.logger.info(f"   当前价格: {row.get('last_price', 0):.4f}, 涨跌幅: {row.get('change_rate', 0):+.2f}%")
                 
             except Exception as e:
-                self.logger.debug(f"获取{option_code}市场快照失败: {e}")
+                self.logger.error(f"获取{option_code}市场快照失败: {e}")
             
             # 如果当前没有大单，使用报价接口作为回退
             if not big_trades:
@@ -964,7 +964,7 @@ class BigOptionsProcessor:
                                     direction = ticker_row.get('ticker_direction', 'Unknown')
                                     self.logger.debug(f"报价回退模式：从get_rt_ticker获取到买卖方向: {direction}")
                             except Exception as ticker_e:
-                                self.logger.debug(f"报价回退模式：获取{option_code}逐笔成交方向失败: {ticker_e}")
+                                self.logger.error(f"报价回退模式：获取{option_code}逐笔成交方向失败: {ticker_e}")
                             
                             quote_trade = {
                                 'stock_code': stock_code,
@@ -1009,12 +1009,12 @@ class BigOptionsProcessor:
                             self.logger.info(f"   执行价格: {option_info.get('strike_price', 0):.2f}, 类型: {option_info.get('option_type', '未知')}{direction_display}")
                             self.logger.info(f"   成交量: {volume2:,}张, 成交额: {turnover2:,.0f}港币")
                 except Exception as e:
-                    self.logger.debug(f"报价回退失败: {e}")
+                    self.logger.error(f"报价回退失败: {e}")
             
             return big_trades
             
         except Exception as e:
-            self.logger.debug(f"获取{option_code}大单交易失败: {e}")
+            self.logger.error(f"获取{option_code}大单交易失败: {e}")
             return []
     
     def save_big_options_summary(self, big_options: List[Dict[str, Any]]):
@@ -1064,23 +1064,12 @@ class BigOptionsProcessor:
     def _parse_strike_from_code(self, option_code: str) -> float:
         """从期权代码解析执行价格（使用末尾的 C/P 标识）"""
         try:
-            if option_code.startswith('HK.'):
-                code_part = option_code[3:]  # 去掉 HK.
-                # 优先用正则匹配末尾的 C/P + 数字
-                m = re.search(r'([CP])(\d+)$', code_part)
-                if m:
-                    digits = m.group(2)
-                    return float(digits) / 1000.0
-                # 回退：取最后一个 C 或 P 之后的所有数字
-                opt_pos = max(code_part.rfind('C'), code_part.rfind('P'))
-                if opt_pos != -1:
-                    tail = code_part[opt_pos + 1:]
-                    digits = ''.join(ch for ch in tail if ch.isdigit())
-                    if digits:
-                        return float(digits) / 1000.0
+            from .option_code_parser import get_strike_price
+            strike = get_strike_price(option_code)
+            return strike if strike is not None else 0.0
         except Exception as e:
-            self.logger.debug(f"解析执行价格失败: {e}")
-        return 0.0
+            self.logger.error(f"解析执行价格失败: {e}")
+            return 0.0
     
     def _parse_expiry_from_code(self, option_code: str) -> str:
         """从期权代码解析到期日（使用紧邻最后 C/P 之前的6位数字 YYMMDD）"""
@@ -1100,7 +1089,7 @@ class BigOptionsProcessor:
                     except ValueError:
                         return ''
         except Exception as e:
-            self.logger.debug(f"解析到期日失败: {e}")
+            self.logger.error(f"解析到期日失败: {e}")
         return ''
     
     def _parse_option_type_from_code(self, option_code: str) -> str:
@@ -1108,18 +1097,11 @@ class BigOptionsProcessor:
         try:
             if option_code.startswith('HK.'):
                 code_part = option_code[3:]  # 去掉 HK.
-                # 优先：匹配末尾的 C/P+数字
-                m = re.search(r'([CP])(\d+)$', code_part)
-                if m:
-                    return 'Call' if m.group(1) == 'C' else 'Put'
-                # 回退：比较最后一次出现的 C 与 P
-                c_pos = code_part.rfind('C')
-                p_pos = code_part.rfind('P')
-                if c_pos == -1 and p_pos == -1:
-                    return '未知'
-                return 'Call' if c_pos > p_pos else 'Put'
+                # 使用统一的期权代码解析器
+                from .option_code_parser import get_option_type
+                return get_option_type(option_code)
         except Exception as e:
-            self.logger.debug(f"解析期权类型失败: {e}")
+            self.logger.error(f"解析期权类型失败: {e}")
         return '未知'
 
     def _calculate_statistics(self, big_options: List[Dict[str, Any]]) -> Dict[str, Any]:

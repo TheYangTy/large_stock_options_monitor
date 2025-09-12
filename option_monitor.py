@@ -109,7 +109,7 @@ class OptionMonitor:
                 # 立即落盘，便于后续使用
                 self._save_stock_base_info()
         except Exception as e:
-            self.logger.debug(f"加载基础信息失败(忽略): {e}")
+            self.logger.error(f"加载基础信息失败(忽略): {e}")
             if not hasattr(self, 'stock_base_info') or self.stock_base_info is None:
                 self.stock_base_info = {}
 
@@ -123,7 +123,7 @@ class OptionMonitor:
             with open(self.stock_base_info_file, 'w', encoding='utf-8') as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            self.logger.debug(f"保存基础信息失败(忽略): {e}")
+            self.logger.error(f"保存基础信息失败(忽略): {e}")
 
     def _load_stock_prices_cache(self):
         """从文件加载股价缓存"""
@@ -424,7 +424,7 @@ class OptionMonitor:
                             self.price_update_time[stock_code] = datetime.now()
                             return float(info)
                 except Exception as _e:
-                    self.logger.debug(f"读取文件缓存失败(忽略): {_e}")
+                    self.logger.error(f"读取文件缓存失败(忽略): {_e}")
                 
                 self.logger.info(f"使用兜底默认股价: {stock_code} = 100.0")
                 return 100.0
@@ -529,7 +529,17 @@ class OptionMonitor:
                 # 使用big_options_processor中的方法解析期权代码
                 strike_price = self.big_options_processor._parse_strike_from_code(option_code)
                 # 基于末尾 C/P 的相对位置判断类型，避免被标的简称中的字母误伤
-                option_type = ('Call' if option_code.rfind('C') > option_code.rfind('P') else 'Put') if ('C' in option_code or 'P' in option_code) else '未知'
+                # 使用统一的期权代码解析器
+                from utils.option_code_parser import get_option_type, get_expiry_date, get_strike_price
+                option_type = get_option_type(option_code)
+                parsed_expiry = get_expiry_date(option_code)
+                parsed_strike = get_strike_price(option_code)
+                
+                # 如果解析器能解析出更准确的信息，使用解析器的结果
+                if parsed_expiry:
+                    expiry_date = parsed_expiry
+                if parsed_strike:
+                    strike_price = parsed_strike
                 expiry_date = self.big_options_processor._parse_expiry_from_code(option_code)
                 option_info = {
                     'strike_price': strike_price,
@@ -581,7 +591,7 @@ class OptionMonitor:
                                     try:
                                         self._save_option_chains_cache()
                                     except Exception as _e:
-                                        self.logger.debug(f"保存期权链缓存失败(略过): {_e}")
+                                        self.logger.error(f"保存期权链缓存失败(略过): {_e}")
                             
                             # 从期权链中查找匹配的期权代码
                             if oc_df is not None and not oc_df.empty:
@@ -613,7 +623,7 @@ class OptionMonitor:
             # 使用API获取逐笔交易数据
             ret, data = self.quote_ctx.get_rt_ticker(option_code)
             if ret != ft.RET_OK:
-                self.logger.debug(f"获取{option_code}交易数据失败: {data}")
+                self.logger.error(f"获取{option_code}交易数据失败: {data}")
                 
                 # 如果逐笔交易获取失败，尝试获取市场快照
                 ret_snap, snap_data = self.quote_ctx.get_market_snapshot([option_code])
@@ -845,8 +855,8 @@ class OptionMonitor:
                                 self.logger.info(f"快速检查发现 {len(trades_df)} 笔大单: {stock_code} - {option_code}")
                                 
                 except Exception as e:
-                    self.logger.debug(f"快速检查{stock_code}失败: {e}")
-                    self.logger.debug(traceback.format_exc())
+                    self.logger.error(f"快速检查{stock_code}失败: {e}")
+                    self.logger.error(traceback.format_exc())
                     
         except Exception as e:
             self.logger.error(f"快速期权检查失败: {e}")
@@ -1010,22 +1020,8 @@ class OptionMonitor:
     
     def _parse_option_type(self, option_code: str) -> str:
         """解析期权类型 (Call/Put)"""
-        import re
-        
-        if not option_code:
-            return "Unknown"
-
-        try:
-            if option_code.startswith('HK.'):
-                code_part = option_code[3:]  # 去掉 HK.
-                # 规则：匹配两段数字之间的单个 C 或 P，例如 ...250929P102500
-                m = re.search(r'\d+([CP])\d+', code_part)
-                if m:
-                    return 'Call (看涨)' if m.group(1) == 'C' else 'Put (看跌)'
-        except Exception as e:
-            self.logger.debug(f"解析期权类型失败: {e}")
-        
-        return "Unknown"
+        from utils.option_code_parser import get_option_type
+        return get_option_type(option_code)
     
     def start_monitoring(self):
         """启动监控"""
@@ -1083,8 +1079,8 @@ class OptionMonitor:
                         # 每个股票取前5个期权
                         active_options.extend(option_codes[:5])
                 except Exception as e:
-                    self.logger.debug(f"获取{stock_code}期权失败: {e}")
-                    self.logger.debug(traceback.format_exc())
+                    self.logger.error(f"获取{stock_code}期权失败: {e}")
+                    self.logger.error(traceback.format_exc())
             
             # 计算需要新增和需要取消的订阅
             active_options_set = set(active_options)
@@ -1307,7 +1303,13 @@ class OptionTickerHandler(ft.TickerHandlerBase):
     def _extract_stock_code(self, option_code):
         """从期权代码提取股票代码"""
         try:
-            # 期权代码格式通常为 HK.00700C2309A
+            # 使用统一的期权代码解析器
+            from utils.option_code_parser import get_stock_code
+            stock_code = get_stock_code(option_code)
+            if stock_code:
+                return stock_code
+            
+            # 兜底逻辑：期权代码格式通常为 HK.00700C2309A
             if option_code.startswith('HK.'):
                 # 提取股票代码部分
                 parts = option_code[3:].split('C')

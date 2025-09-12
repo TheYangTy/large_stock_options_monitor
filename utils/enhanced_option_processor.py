@@ -149,9 +149,11 @@ class EnhancedOptionProcessor:
         option_code_upper = option_code.upper()
         
         # 港股期权代码格式通常包含C(Call)或P(Put)
-        if 'C' in option_code_upper:
+        from utils.option_code_parser import get_option_type
+        parsed_type = get_option_type(option_code)
+        if parsed_type == 'Call':
             return "Call (看涨期权)"
-        elif 'P' in option_code_upper:
+        elif parsed_type == 'Put':
             return "Put (看跌期权)"
         else:
             return "Unknown"

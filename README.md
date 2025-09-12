@@ -1,420 +1,190 @@
-# 港股期权大单监控系统 📈
+# 港股期权大单监控系统
 
-[![GitHub stars](https://img.shields.io/github/stars/altenli/large_stock_options_monitor?style=flat-square)](https://github.com/altenli/large_stock_options_monitor/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/altenli/large_stock_options_monitor?style=flat-square)](https://github.com/altenli/large_stock_options_monitor/network)
-[![Python Version](https://img.shields.io/badge/python-3.11+-blue?style=flat-square)](https://www.python.org/)
+## 系统概述
 
-基于 Futu OpenD 的港股期权大单实时监控系统，支持企微机器人推送、交易量变化检测和智能分析。
+本系统提供港股期权大单实时监控功能，支持V1和V2两个版本，具备完整的数据存储、分析和通知功能。
 
-🎯 把压箱底的好东西分享出来，希望各位大佬赚钱后赏个鸡腿🍗，谢谢！
+## 快速启动
 
-**联系方式**：WX: `altenli` | 支持付费咨询&部署
-
----
-
-## 📋 目录
-
-- [功能特点](#-功能特点)
-- [技术架构](#-技术架构)
-- [系统要求](#-系统要求)
-- [快速开始](#-快速开始)
-- [配置说明](#️-配置说明)
-- [企微机器人设置](#-企微机器人设置)
-- [使用方法](#-使用方法)
-- [Web界面](#-web界面)
-- [运行截图](#-运行截图)
-- [数据存储](#-数据存储)
-- [注意事项](#️-注意事项)
-- [常见问题](#-常见问题)
-- [贡献指南](#-贡献指南)
-- [赞助支持](#-赞助支持)
-
----
-
-## 🚀 功能特点
-
-### 核心功能
-- **🔍 实时监控**：自动监控指定港股的期权大单交易
-- **🧠 智能分析**：自动识别期权类型(Call/Put)和交易方向(买入/卖出)
-- **📊 变化检测**：只通知交易量发生变化的大单，避免重复通知
-- **📈 股票信息**：显示股票名称和实时价格，更加直观
-
-### 通知系统
-- **🤖 企微机器人**：支持企业微信机器人推送
-- **💻 系统通知**：Mac系统原生通知
-- **🌐 Web界面**：实时数据展示和监控面板
-
-### 数据管理
-- **📋 汇总报告**：自动生成交易汇总报告
-- **⏰ 定时刷新**：可配置的数据刷新间隔（默认5分钟）
-- **💾 数据缓存**：股价缓存机制，优化API性能
-- **📝 历史记录**：完整的交易历史数据存储
-
----
-
-## 🏗️ 技术架构
-
-- **编程语言**：Python 3.11+
-- **数据接口**：Futu OpenD API
-- **Web框架**：Flask
-- **数据存储**：JSON + CSV
-- **通知系统**：企业微信 Webhook API
-- **前端技术**：HTML5 + CSS3 + JavaScript
-
----
-
-## 📊 系统要求
-
-### 软件要求
-- **Python**: 3.11 或更高版本
-- **Futu OpenD**: 最新版本
-- **操作系统**: Windows / macOS / Linux
-
-### 硬件要求
-- **内存**: 最少 2GB RAM
-- **存储**: 至少 100MB 可用空间
-- **网络**: 稳定的互联网连接
-
-### 账户要求
-- 富途证券账户（用于 OpenD 连接）
-- 企业微信账户（可选，用于通知推送）
-
----
-
-## 🚀 快速开始
-
-### 1. 克隆项目
+### V1系统（原版本）
 ```bash
-git clone https://github.com/altenli/large_stock_options_monitor.git
-cd large_stock_options_monitor
-```
-
-### 2. 创建虚拟环境
-```bash
-# 使用 conda（推荐）
-conda create -n stock_options_env python=3.11
-conda activate stock_options_env
-
-# 或使用 venv
-python -m venv stock_options_env
-source stock_options_env/bin/activate  # Linux/macOS
-# stock_options_env\Scripts\activate   # Windows
-```
-
-### 3. 安装依赖
-```bash
-pip install -r requirements.txt
-```
-
-### 4. 配置系统
-```bash
-# 复制配置文件模板
-cp config.py.example config.py
-
-# 编辑配置文件
-nano config.py  # 或使用其他编辑器
-```
-
-### 5. 启动 Futu OpenD
-确保 Futu OpenD 已正确安装并运行在 `127.0.0.1:11111`
-
-### 6. 运行监控程序
-```bash
-# 持续监控模式
+# 在项目根目录启动
 python option_monitor.py
-
-# 单次运行模式（测试用）
-python option_monitor.py --once
 ```
 
----
-
-## ⚙️ 配置说明
-
-所有配置都在 `config.py` 文件中，从 `config.py.example` 复制并修改：
-
-### 核心配置
-
-#### Futu OpenD 连接
-```python
-FUTU_CONFIG = {
-    'host': '127.0.0.1',
-    'port': 11111,
-    'market': 'HK',  # 港股市场
-}
-```
-
-#### 监控股票列表
-```python
-MONITOR_STOCKS = [
-    'HK.00700',  # 腾讯控股
-    'HK.09988',  # 阿里巴巴
-    'HK.03690',  # 美团
-    # 添加更多股票代码
-]
-```
-
-#### 期权过滤条件
-```python
-OPTION_FILTER = {
-    'min_volume': 100,        # 最小成交量（手）
-    'min_turnover': 50000,    # 最小成交额（港币）
-    'min_premium': 1000,      # 最小权利金
-    'price_range': (0.01, 50), # 价格范围
-    'show_all_big_options': False,  # 是否显示所有大单
-}
-```
-
-#### 监控时间设置
-```python
-MONITOR_TIME = {
-    'interval': 300,      # 监控间隔（秒）
-    'lookback_days': 1,   # 回看天数
-}
-```
-
-### 通知配置
-```python
-NOTIFICATION = {
-    'enable_wework': True,    # 启用企微通知
-    'enable_system': True,    # 启用系统通知
-    'wework_config': {
-        'webhook_url': 'YOUR_WEBHOOK_URL',
-        'mentioned_list': [],
-        'mentioned_mobile_list': [],
-    }
-}
-```
-
----
-
-## 🤖 企微机器人设置
-
-### 1. 创建企微机器人
-1. 在企业微信群中，点击右上角 `···` 
-2. 选择 `添加群机器人`
-3. 创建机器人并获取 Webhook URL
-
-### 2. 配置机器人
-在 `config.py` 中配置：
-```python
-'wework_config': {
-    'webhook_url': 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxxxxx',
-    'mentioned_list': ['@all'],  # @所有人
-    'mentioned_mobile_list': [],  # 或指定手机号
-}
-```
-
-📖 **详细设置步骤**：请参考 [`WEWORK_SETUP.md`](WEWORK_SETUP.md)
-
----
-
-## 📱 使用方法
-
-### 基本使用
-
-1. **启动监控程序**
-   ```bash
-   python option_monitor.py
-   ```
-
-2. **启动 Web 界面**（可选）
-   ```bash
-   python web_dashboard.py
-   ```
-   访问：http://localhost:5000
-
-3. **测试模式**
-   ```bash
-   python option_monitor.py --once
-   ```
-
-### 命令行参数
-- `--once`: 单次运行模式，用于测试配置
-- `--config`: 指定配置文件路径
-- `--debug`: 启用调试模式
-
----
-
-## 🌐 Web界面
-
-### 功能特性
-- **📊 实时数据**：显示大单期权实时数据
-- **🔄 自动刷新**：可配置刷新间隔
-- **📈 详细信息**：期权类型、交易方向、股票信息
-- **🔥 变化标记**：交易量变化可视化标识
-- **🧪 测试功能**：企微机器人测试按钮
-
-### 访问方式
-- **本地访问**：http://localhost:5000
-- **局域网访问**：配置 `WEB_CONFIG` 中的 host 和 port
-
----
-
-## 📸 运行截图
-
-### 控制台输出
-![启动option_monitor](screenshots/console_output2.png)
-
-![启动Web界面](screenshots/console_output.png)
-
-### Web界面
-![Web界面](screenshots/web_dashboard.png)
-
-### 企微机器人通知
-![企微机器人通知](screenshots/wework_notification.png)
-
----
-
-## 💾 数据存储
-
-### 文件结构
-```
-data/
-├── current_big_option.json    # 当前大单期权汇总
-├── option_trades.csv          # 历史交易记录
-└── cache/                     # 缓存文件
-
-logs/
-└── option_monitor.log         # 系统日志
-
-screenshots/                   # 截图文件
-```
-
-### 数据格式
-- **JSON格式**：实时数据和配置
-- **CSV格式**：历史交易记录，便于Excel分析
-- **日志格式**：标准Python logging格式
-
----
-
-## 🔄 交易量变化检测
-
-### 检测机制
-- **🔥 新增大单**：交易量有变化的大单
-- **⚪ 存量大单**：符合条件但交易量无变化
-- **📊 阈值控制**：可配置显示策略
-
-### 配置选项
-```python
-OPTION_FILTER = {
-    'show_all_big_options': False,  # True: 显示所有大单
-                                   # False: 仅显示变化大单
-}
-```
-
----
-
-## ⚠️ 注意事项
-
-### 运行环境
-- ✅ 确保 Futu OpenD 已正确配置并启动
-- ✅ 建议在交易时段内运行以获取实时数据
-- ✅ 网络连接稳定，避免API调用失败
-
-### 配置建议
-- 🔧 根据需要调整筛选条件，避免噪音
-- 🔧 合理设置监控间隔，平衡实时性和性能
-- 🔧 定期检查日志文件，监控系统状态
-
-### 风险提示
-- ⚠️ 本系统仅用于信息监控，不构成投资建议
-- ⚠️ 期权交易存在风险，请谨慎决策
-- ⚠️ 确保遵守相关法律法规和交易所规则
-
----
-
-## ❓ 常见问题
-
-### Q: Futu OpenD 连接失败怎么办？
-**A**: 检查以下几点：
-1. 确认 Futu OpenD 已启动且端口正确（默认11111）
-2. 检查防火墙设置
-3. 确认富途账户已登录
-
-### Q: 企微机器人不推送消息？
-**A**: 请检查：
-1. Webhook URL 是否正确
-2. 机器人是否被移除群聊
-3. 消息频率是否过高被限制
-
-### Q: Web界面无法访问？
-**A**: 确认：
-1. Flask 应用是否正常启动
-2. 端口是否被占用
-3. 防火墙设置
-
-### Q: 如何添加新的监控股票？
-**A**: 在 `config.py` 的 `MONITOR_STOCKS` 列表中添加股票代码，格式为 `'HK.XXXXX'`
-
----
-
-## 🤝 贡献指南
-
-欢迎贡献代码和建议！
-
-### 贡献方式
-1. **🐛 报告Bug**：提交Issue描述问题
-2. **💡 功能建议**：在Discussion中讨论新功能
-3. **🔧 代码贡献**：Fork项目并提交Pull Request
-
-### 开发环境
+### V2系统（优化版本）
 ```bash
-# 克隆项目
-git clone https://github.com/altenli/large_stock_options_monitor.git
+# 方式1: 使用启动脚本（推荐）
+python start_v2_monitor.py --mode monitor
 
-# 安装开发依赖
-pip install -r requirements-dev.txt
-
-# 运行测试
-python -m pytest tests/
+# 方式2: 进入v2_system目录启动
+cd v2_system
+python option_monitor_v2.py --mode monitor
 ```
 
-### 代码规范
-- 遵循 PEP 8 代码风格
-- 添加适当的注释和文档
-- 提交前运行测试确保代码质量
+## 系统特性
 
----
+### 🎯 核心功能
+- **实时监控**: 7×24小时港股期权大单监控
+- **智能分析**: 期权Greeks计算、隐含波动率分析
+- **多渠道通知**: 企微、Mac通知、控制台输出
+- **数据存储**: SQLite时序数据库，支持历史数据查询
+- **Web界面**: V2系统提供现代化管理界面
 
-## 💖 赞助支持
+### 🔧 技术架构
+- **后台线程**: 专门的API交互线程，处理股票订阅和回调
+- **数据缓存**: 股票数据全量缓存，减少API调用
+- **事件驱动**: 基于事件的架构设计，高效处理实时数据
+- **容错机制**: 自动重连、错误恢复、数据备份
 
-如果这个项目对您有帮助，欢迎赞助支持！
+## 系统对比
 
-<details>
-<summary>💰 展开查看微信 / 支付宝打赏二维码</summary>
+| 特性 | V1系统 | V2系统 |
+|------|--------|--------|
+| 启动方式 | 根目录直接启动 | 支持根目录启动 |
+| 数据存储 | 文件缓存 | SQLite数据库 |
+| Web界面 | 基础界面 | 现代化界面 |
+| 后台线程 | 集成在主程序 | 独立API管理器 |
+| 配置管理 | config.py | 独立配置系统 |
+| 通知系统 | 企微+Mac | 企微+Mac（独立） |
 
-<p align="center">
-  <img src="screenshots/wx.png" alt="微信赞赏码" width="300" />
-  <img src="screenshots/zfb.png" alt="支付宝收款码" width="300" />
-</p>
+## 命令行参数
 
-</details>
+### V2系统参数
+```bash
+# 监控模式（默认）
+python start_v2_monitor.py --mode monitor
 
-### 其他支持方式
-- ⭐ 给项目点个Star
-- 🔄 分享给更多朋友
-- 🐛 报告问题和建议
-- 💻 贡献代码
+# 扫描模式
+python start_v2_monitor.py --mode scan
 
----
+# 状态检查
+python start_v2_monitor.py --mode status
 
-## ⭐ Star History
+# 测试模式
+python start_v2_monitor.py --mode test
 
-[![Star History Chart](https://api.star-history.com/svg?repos=altenli/large_stock_options_monitor&type=Date)](https://star-history.com/#altenli/large_stock_options_monitor&Date)
+# 配置检查
+python start_v2_monitor.py --config-check
+```
 
----
+## 配置说明
 
-## 📄 许可证
+### V1系统配置
+- 配置文件: `config.py`
+- 缓存目录: `data/`
+- 日志目录: `logs/`
 
-本项目采用 [MIT 许可证](LICENSE)
+### V2系统配置
+- 配置文件: `v2_system/config.py`
+- 数据库: `v2_system/data/options_v2.db`
+- 缓存目录: `v2_system/data/`
+- 日志目录: `v2_system/logs/`
 
----
+## 期权代码格式
 
-<div align="center">
+系统支持港股期权标准格式：
+```
+HK.{股票代码}{YYMMDD}{C/P}{执行价格}
 
-**🎯 让期权监控更简单，让投资决策更明智！**
+示例:
+- HK.TCH250919C670000  # 腾讯 2025-09-19 看涨 67.0000
+- HK.BIU250919C120000  # 哔哩哔哩 2025-09-19 看涨 12.0000  
+- HK.JDC250929P122500  # 京东 2025-09-29 看跌 12.2500
+```
 
-Made with ❤️ by [altenli](https://github.com/altenli)
+## 通知配置
 
-</div>
+### 企业微信通知
+```python
+# 在config.py中配置
+WEWORK_WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY"
+```
+
+### Mac通知
+系统自动使用macOS原生通知，无需额外配置。
+
+## 依赖安装
+
+```bash
+# 基础依赖
+pip install futu-api pandas numpy requests flask
+
+# V2系统额外依赖
+pip install scipy  # 用于期权Greeks计算
+```
+
+## 故障排除
+
+### 常见问题
+
+1. **API连接失败**
+   - 确保富途OpenD客户端正在运行
+   - 检查端口11111是否被占用
+   - 验证网络连接
+
+2. **期权数据获取失败**
+   - 确认在港股交易时间内运行
+   - 检查股票代码是否正确
+   - 清理缓存文件重新获取
+
+3. **通知发送失败**
+   - 检查企微webhook URL配置
+   - 确认Mac通知权限设置
+
+### 日志查看
+```bash
+# V1系统日志
+tail -f logs/option_monitor.log
+
+# V2系统日志
+tail -f v2_system/logs/option_monitor_v2.log
+```
+
+## 开发说明
+
+### 项目结构
+```
+large_stock_options_monitor/
+├── option_monitor.py          # V1系统主程序
+├── start_v2_monitor.py        # V2系统启动脚本
+├── config.py                  # V1系统配置
+├── utils/                     # V1系统工具模块
+├── core/                      # V1系统核心模块
+├── v2_system/                 # V2系统独立目录
+│   ├── option_monitor_v2.py   # V2系统主程序
+│   ├── config.py              # V2系统配置
+│   ├── utils/                 # V2系统工具模块
+│   └── core/                  # V2系统核心模块
+├── data/                      # V1系统数据目录
+├── logs/                      # V1系统日志目录
+└── templates/                 # Web界面模板
+```
+
+### 期权解析器
+系统使用统一的期权代码解析器：
+- V1: `utils/option_code_parser.py`
+- V2: `v2_system/utils/option_code_parser.py`
+
+支持正则表达式精确匹配期权格式，提取股票代码、到期日、期权类型和执行价格。
+
+## 更新日志
+
+### V2.0 (2025-09-12)
+- ✅ 创建完全独立的V2系统
+- ✅ 实现后台API交互线程
+- ✅ 添加SQLite时序数据库
+- ✅ 统一期权代码解析逻辑
+- ✅ 支持从根目录启动V2系统
+- ✅ 修复所有期权类型判断错误
+- ✅ 完善错误处理和自动重连
+
+### V1.x (历史版本)
+- 基础期权监控功能
+- 企微和Mac通知
+- 文件缓存系统
+- Web管理界面
+
+## 许可证
+
+本项目仅供学习和研究使用。

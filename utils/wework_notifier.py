@@ -264,13 +264,8 @@ class WeWorkNotifier:
         if not option_code:
             return "Unknown"
         
-        option_code_upper = option_code.upper()
-        if 'C' in option_code_upper:
-            return "Call (看涨)"
-        elif 'P' in option_code_upper:
-            return "Put (看跌)"
-        else:
-            return "Unknown"
+        from utils.option_code_parser import get_option_type
+        return get_option_type(option_code)
     
     def _parse_direction(self, trade_direction: str) -> str:
         """解析交易方向"""

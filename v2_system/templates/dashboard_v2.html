@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>V2系统 - 港股期权大单监控</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        
+        .header h1 {
+            color: #2c3e50;
+            font-size: 2.5em;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        
+        .version-badge {
+            display: inline-block;
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(45deg, #4CAF50, #45a049);
+            color: white;
+        }
+        
+        .btn-danger {
+            background: linear-gradient(45deg, #f44336, #da190b);
+            color: white;
+        }
+        
+        .btn-info {
+            background: linear-gradient(45deg, #2196F3, #0b7dda);
+            color: white;
+        }
+        
+        .btn-warning {
+            background: linear-gradient(45deg, #ff9800, #e68900);
+            color: white;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+        
+        .status-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .status-item {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        
+        .status-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        
+        .status-value {
+            font-size: 1.2em;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .status-running {
+            color: #27ae60;
+        }
+        
+        .status-stopped {
+            color: #e74c3c;
+        }
+        
+        .data-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        
+        .data-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .data-title {
+            font-size: 1.5em;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        
+        .filters {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .filter-select {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            background: white;
+        }
+        
+        .options-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        
+        .options-table th,
+        .options-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .options-table th {
+            background: linear-gradient(135deg, #34495e, #2c3e50);
+            color: white;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+        
+        .options-table tr:hover {
+            background-color: #f5f5f5;
+        }
+        
+        .amount-large {
+            color: #e74c3c;
+            font-weight: 600;
+        }
+        
+        .amount-medium {
+            color: #f39c12;
+            font-weight: 600;
+        }
+        
+        .amount-small {
+            color: #27ae60;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            border-left: 4px solid #c33;
+        }
+        
+        .success {
+            background: #efe;
+            color: #363;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            border-left: 4px solid #363;
+        }
+        
+        .table-container {
+            max-height: 600px;
+            overflow-y: auto;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .controls {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .btn {
+                width: 200px;
+            }
+            
+            .data-header {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .filters {
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <div class="header">
+            <h1>港股期权大单监控 <span class="version-badge">V2系统</span></h1>
+            <div class="controls">
+                <button class="btn btn-primary" onclick="startMonitor()">启动监控</button>
+                <button class="btn btn-danger" onclick="stopMonitor()">停止监控</button>
+                <button class="btn btn-info" onclick="manualScan()">手动扫描</button>
+                <button class="btn btn-warning" onclick="refreshData()">刷新数据</button>
+            </div>
+        </div>
+        
+        <!-- 状态面板 -->
+        <div class="status-panel">
+            <div class="status-grid">
+                <div class="status-item">
+                    <div class="status-label">运行状态</div>
+                    <div class="status-value" id="running-status">检查中...</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">最后扫描</div>
+                    <div class="status-value" id="last-scan">-</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">扫描次数</div>
+                    <div class="status-value" id="scan-count">0</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">交易时间</div>
+                    <div class="status-value" id="trading-time">-</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">系统版本</div>
+                    <div class="status-value">V2独立系统</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 数据面板 -->
+        <div class="data-panel">
+            <div class="data-header">
+                <div class="data-title">大单期权记录</div>
+                <div class="filters">
+                    <select class="filter-select" id="time-filter" onchange="refreshData()">
+                        <option value="1">最近1小时</option>
+                        <option value="6">最近6小时</option>
+                        <option value="24" selected>最近24小时</option>
+                        <option value="72">最近3天</option>
+                        <option value="168">最近7天</option>
+                    </select>
+                    <select class="filter-select" id="limit-filter" onchange="refreshData()">
+                        <option value="50">显示50条</option>
+                        <option value="100" selected>显示100条</option>
+                        <option value="200">显示200条</option>
+                        <option value="500">显示500条</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div id="message-area"></div>
+            
+            <div class="table-container">
+                <table class="options-table">
+                    <thead>
+                        <tr>
+                            <th>时间</th>
+                            <th>股票</th>
+                            <th>期权代码</th>
+                            <th>类型</th>
+                            <th>行权价</th>
+                            <th>成交价</th>
+                            <th>成交量</th>
+                            <th>成交额</th>
+                            <th>重要性</th>
+                        </tr>
+                    </thead>
+                    <tbody id="options-tbody">
+                        <tr>
+                            <td colspan="9" class="loading">加载中...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let refreshInterval;
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshStatus();
+            refreshData();
+            
+            // 设置自动刷新
+            refreshInterval = setInterval(() => {
+                refreshStatus();
+                refreshData();
+            }, 30000); // 30秒刷新一次
+        });
+        
+        // 显示消息
+        function showMessage(message, type = 'info') {
+            const messageArea = document.getElementById('message-area');
+            const className = type === 'error' ? 'error' : 'success';
+            messageArea.innerHTML = `<div class="${className}">${message}</div>`;
+            
+            // 3秒后自动清除消息
+            setTimeout(() => {
+                messageArea.innerHTML = '';
+            }, 3000);
+        }
+        
+        // 刷新状态
+        async function refreshStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const result = await response.json();
+                
+                if (result.success) {
+                    const status = result.data;
+                    
+                    // 更新运行状态
+                    const runningStatus = document.getElementById('running-status');
+                    if (status.is_running) {
+                        runningStatus.textContent = '运行中';
+                        runningStatus.className = 'status-value status-running';
+                    } else {
+                        runningStatus.textContent = '已停止';
+                        runningStatus.className = 'status-value status-stopped';
+                    }
+                    
+                    // 更新其他状态
+                    document.getElementById('last-scan').textContent = 
+                        status.last_scan_time ? new Date(status.last_scan_time).toLocaleString() : '-';
+                    document.getElementById('scan-count').textContent = status.scan_count || 0;
+                    document.getElementById('trading-time').textContent = 
+                        status.is_trading_time ? '交易时间' : '非交易时间';
+                }
+            } catch (error) {
+                console.error('刷新状态失败:', error);
+            }
+        }
+        
+        // 刷新数据
+        async function refreshData() {
+            try {
+                const timeFilter = document.getElementById('time-filter').value;
+                const limitFilter = document.getElementById('limit-filter').value;
+                
+                const response = await fetch(`/api/big_options?hours=${timeFilter}&limit=${limitFilter}`);
+                const result = await response.json();
+                
+                const tbody = document.getElementById('options-tbody');
+                
+                if (result.success) {
+                    const options = result.data;
+                    
+                    if (options.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="9" class="loading">暂无数据</td></tr>';
+                        return;
+                    }
+                    
+                    tbody.innerHTML = options.map(option => {
+                        const amount = option.turnover || 0;
+                        let amountClass = 'amount-small';
+                        if (amount >= 10000000) amountClass = 'amount-large';
+                        else if (amount >= 5000000) amountClass = 'amount-medium';
+                        
+                        return `
+                            <tr>
+                                <td>${new Date(option.timestamp).toLocaleString()}</td>
+                                <td>${option.stock_name || '-'}</td>
+                                <td>${option.option_code || '-'}</td>
+                                <td>${option.option_type || '-'}</td>
+                                <td>${option.strike_price || '-'}</td>
+                                <td>${option.last_price || '-'}</td>
+                                <td>${(option.volume || 0).toLocaleString()}</td>
+                                <td class="${amountClass}">¥${amount.toLocaleString()}</td>
+                                <td>${option.importance_score || '-'}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="9" class="error">加载失败: ${result.error}</td></tr>`;
+                }
+            } catch (error) {
+                console.error('刷新数据失败:', error);
+                document.getElementById('options-tbody').innerHTML = 
+                    '<tr><td colspan="9" class="error">网络错误</td></tr>';
+            }
+        }
+        
+        // 启动监控
+        async function startMonitor() {
+            try {
+                const response = await fetch('/api/start_monitor', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage(result.message, 'success');
+                    setTimeout(refreshStatus, 2000); // 2秒后刷新状态
+                } else {
+                    showMessage(result.message || result.error, 'error');
+                }
+            } catch (error) {
+                showMessage('启动监控失败: ' + error.message, 'error');
+            }
+        }
+        
+        // 停止监控
+        async function stopMonitor() {
+            try {
+                const response = await fetch('/api/stop_monitor', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage(result.message, 'success');
+                    setTimeout(refreshStatus, 1000); // 1秒后刷新状态
+                } else {
+                    showMessage(result.message || result.error, 'error');
+                }
+            } catch (error) {
+                showMessage('停止监控失败: ' + error.message, 'error');
+            }
+        }
+        
+        // 手动扫描
+        async function manualScan() {
+            try {
+                showMessage('正在扫描...', 'info');
+                
+                const response = await fetch('/api/manual_scan', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage(result.message, 'success');
+                    setTimeout(() => {
+                        refreshStatus();
+                        refreshData();
+                    }, 1000);
+                } else {
+                    showMessage(result.error, 'error');
+                }
+            } catch (error) {
+                showMessage('手动扫描失败: ' + error.message, 'error');
+            }
+        }
+        
+        // 页面卸载时清除定时器
+        window.addEventListener('beforeunload', function() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+        });
+    </script>
+</body>
+</html>

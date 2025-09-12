@@ -109,9 +109,9 @@ class Notifier:
             if isinstance(code, str) and code.startswith('HK.'):
                 code_part = code[3:]
                 import re as _re
-                m = _re.search(r'([CP])(\d+)$', code_part)
+                m = _re.search(r'\d+([CP])\d+', code_part)
                 if m:
-                    opt_type_text = 'Call (看涨)' if m.group(1) == 'C' else 'Put (看跌)'
+                    opt_type_text = 'Call' if m.group(1) == 'C' else 'Put'
         except Exception:
             opt_type_text = ''
 

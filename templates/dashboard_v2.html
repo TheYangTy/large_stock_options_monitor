@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>港股期权大单监控系统 V2.0</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            color: #2c3e50;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .status-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .status-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .status-card h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .status-item:last-child {
+            border-bottom: none;
+        }
+
+        .status-label {
+            color: #666;
+        }
+
+        .status-value {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .status-connected {
+            color: #27ae60;
+        }
+
+        .status-disconnected {
+            color: #e74c3c;
+        }
+
+        .controls {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .controls h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+        }
+
+        .control-group {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        .control-group label {
+            color: #666;
+            font-weight: 500;
+        }
+
+        .control-group select,
+        .control-group input {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s ease;
+        }
+
+        .control-group select:focus,
+        .control-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
+        }
+
+        .data-section {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .data-section h3 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-size: 1.3em;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+            white-space: nowrap;
+        }
+
+        th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        .option-call {
+            color: #27ae60;
+            font-weight: bold;
+        }
+
+        .option-put {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+
+        .moneyness-itm {
+            background-color: #d5f4e6;
+            color: #27ae60;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        .moneyness-atm {
+            background-color: #fff3cd;
+            color: #856404;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        .moneyness-otm {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        .risk-low {
+            color: #27ae60;
+        }
+
+        .risk-medium {
+            color: #f39c12;
+        }
+
+        .risk-high {
+            color: #e74c3c;
+        }
+
+        .direction-buy {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+
+        .direction-sell {
+            color: #27ae60;
+            font-weight: bold;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+
+        .success {
+            background-color: #d5f4e6;
+            color: #27ae60;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 0.9em;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-style: italic;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+
+            .header h1 {
+                font-size: 2em;
+            }
+
+            .control-group {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .status-grid {
+                grid-template-columns: 1fr;
+            }
+
+            th, td {
+                padding: 8px;
+                font-size: 0.9em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 港股期权大单监控系统 V2.0</h1>
+            <p style="text-align: center; color: #666; margin-top: 10px;">
+                实时监控港股期权大单交易，智能分析期权数据
+            </p>
+        </div>
+
+        <!-- 系统状态 -->
+        <div class="status-grid" id="statusGrid">
+            <div class="status-card">
+                <h3>📡 API连接状态</h3>
+                <div class="loading">加载中...</div>
+            </div>
+            <div class="status-card">
+                <h3>📊 数据库统计</h3>
+                <div class="loading">加载中...</div>
+            </div>
+            <div class="status-card">
+                <h3>📈 监控股票</h3>
+                <div class="loading">加载中...</div>
+            </div>
+            <div class="status-card">
+                <h3>⏰ 系统时间</h3>
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+
+        <!-- 控制面板 -->
+        <div class="controls">
+            <h3>🎛️ 控制面板</h3>
+            <div class="control-group">
+                <label>时间范围:</label>
+                <select id="timeRange">
+                    <option value="1">最近1小时</option>
+                    <option value="6">最近6小时</option>
+                    <option value="24" selected>最近24小时</option>
+                    <option value="72">最近3天</option>
+                    <option value="168">最近7天</option>
+                </select>
+                
+                <label>股票筛选:</label>
+                <select id="stockFilter">
+                    <option value="">全部股票</option>
+                </select>
+                
+                <button class="btn" onclick="refreshData()">🔄 刷新数据</button>
+                <button class="btn btn-secondary" onclick="exportData()">📥 导出数据</button>
+            </div>
+        </div>
+
+        <!-- 大单交易 -->
+        <div class="data-section">
+            <h3>🔥 大单期权交易</h3>
+            <div id="bigTradesContainer">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+
+        <!-- 股票报价 -->
+        <div class="data-section">
+            <h3>💹 实时股票报价</h3>
+            <div id="stockQuotesContainer">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>© 2024 港股期权大单监控系统 V2.0 | 数据来源: 富途OpenD API</p>
+    </div>
+
+    <script>
+        // 全局变量
+        let refreshInterval;
+        let currentData = {
+            status: null,
+            bigTrades: [],
+            stockQuotes: {}
+        };
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            loadInitialData();
+            startAutoRefresh();
+        });
+
+        // 加载初始数据
+        async function loadInitialData() {
+            await Promise.all([
+                loadStatus(),
+                loadBigTrades(),
+                loadStockQuotes()
+            ]);
+        }
+
+        // 开始自动刷新
+        function startAutoRefresh() {
+            refreshInterval = setInterval(() => {
+                loadStatus();
+                loadBigTrades();
+                loadStockQuotes();
+            }, 30000); // 30秒刷新一次
+        }
+
+        // 加载系统状态
+        async function loadStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentData.status = data;
+                    renderStatus(data);
+                    updateStockFilter(data.monitor_stocks);
+                } else {
+                    showError('加载系统状态失败: ' + data.error);
+                }
+            } catch (error) {
+                showError('加载系统状态失败: ' + error.message);
+            }
+        }
+
+        // 渲染系统状态
+        function renderStatus(data) {
+            const statusGrid = document.getElementById('statusGrid');
+            
+            statusGrid.innerHTML = `
+                <div class="status-card">
+                    <h3>📡 API连接状态</h3>
+                    <div class="status-item">
+                        <span class="status-label">连接状态:</span>
+                        <span class="status-value ${data.api_status.connected ? 'status-connected' : 'status-disconnected'}">
+                            ${data.api_status.connected ? '已连接' : 'Web模式'}
+                        </span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">订阅股票:</span>
+                        <span class="status-value">${data.api_status.subscribed_stocks || 0}</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">订阅期权:</span>
+                        <span class="status-value">${data.api_status.subscribed_options || 0}</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">缓存报价:</span>
+                        <span class="status-value">${data.api_status.cached_quotes || 0}</span>
+                    </div>
+                </div>
+                
+                <div class="status-card">
+                    <h3>📊 数据库统计</h3>
+                    <div class="status-item">
+                        <span class="status-label">总记录数:</span>
+                        <span class="status-value">${data.database_stats.total_records || 0}</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">大单交易:</span>
+                        <span class="status-value">${data.database_stats.big_trades || 0}</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">监控股票:</span>
+                        <span class="status-value">${data.database_stats.unique_stocks || 0}</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">期权品种:</span>
+                        <span class="status-value">${data.database_stats.unique_options || 0}</span>
+                    </div>
+                </div>
+                
+                <div class="status-card">
+                    <h3>📈 监控股票</h3>
+                    ${data.monitor_stocks.map(stock => `
+                        <div class="status-item">
+                            <span class="status-label">${stock}</span>
+                            <span class="status-value">监控中</span>
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <div class="status-card">
+                    <h3>⏰ 系统时间</h3>
+                    <div class="status-item">
+                        <span class="status-label">当前时间:</span>
+                        <span class="status-value">${new Date(data.timestamp).toLocaleString()}</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">运行状态:</span>
+                        <span class="status-value status-connected">正常运行</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        // 更新股票筛选器
+        function updateStockFilter(stocks) {
+            const stockFilter = document.getElementById('stockFilter');
+            const currentValue = stockFilter.value;
+            
+            stockFilter.innerHTML = '<option value="">全部股票</option>';
+            stocks.forEach(stock => {
+                const option = document.createElement('option');
+                option.value = stock;
+                option.textContent = stock;
+                stockFilter.appendChild(option);
+            });
+            
+            stockFilter.value = currentValue;
+        }
+
+        // 加载大单交易
+        async function loadBigTrades() {
+            try {
+                const hours = document.getElementById('timeRange').value;
+                const stockCodes = document.getElementById('stockFilter').value;
+                
+                let url = `/api/big_trades?hours=${hours}`;
+                if (stockCodes) {
+                    url += `&stock_codes=${stockCodes}`;
+                }
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentData.bigTrades = data.trades;
+                    renderBigTrades(data.trades);
+                } else {
+                    showError('加载大单交易失败: ' + data.error);
+                }
+            } catch (error) {
+                showError('加载大单交易失败: ' + error.message);
+            }
+        }
+
+        // 渲染大单交易
+        function renderBigTrades(trades) {
+            const container = document.getElementById('bigTradesContainer');
+            
+            if (!trades || trades.length === 0) {
+                container.innerHTML = '<div class="no-data">暂无大单交易数据</div>';
+                return;
+            }
+            
+            const tableHtml = `
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>股票</th>
+                                <th>期权代码</th>
+                                <th>类型</th>
+                                <th>执行价</th>
+                                <th>期权价格</th>
+                                <th>成交量</th>
+                                <th>成交额</th>
+                                <th>方向</th>
+                                <th>价值状态</th>
+                                <th>风险等级</th>
+                                <th>重要性</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${trades.map(trade => `
+                                <tr>
+                                    <td>${trade.time || ''}</td>
+                                    <td>
+                                        <div>${trade.stock_code}</div>
+                                        <div style="font-size: 0.8em; color: #666;">${trade.stock_name}</div>
+                                    </td>
+                                    <td style="font-size: 0.8em;">${trade.option_code}</td>
+                                    <td class="${trade.option_type === 'Call' ? 'option-call' : 'option-put'}">
+                                        ${trade.option_type}
+                                    </td>
+                                    <td>${trade.strike_price}</td>
+                                    <td>${trade.option_price}</td>
+                                    <td>${trade.volume}</td>
+                                    <td>${formatNumber(trade.turnover)}</td>
+                                    <td class="${trade.direction === 'BUY' ? 'direction-buy' : 'direction-sell'}">
+                                        ${trade.direction}
+                                    </td>
+                                    <td>
+                                        <span class="moneyness-${trade.moneyness ? trade.moneyness.toLowerCase() : 'unknown'}">
+                                            ${trade.moneyness || 'Unknown'}
+                                        </span>
+                                    </td>
+                                    <td class="risk-${trade.risk_level ? trade.risk_level.toLowerCase() : 'unknown'}">
+                                        ${trade.risk_level || 'Unknown'}
+                                    </td>
+                                    <td>${trade.importance_score || 0}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            
+            container.innerHTML = tableHtml;
+        }
+
+        // 加载股票报价
+        async function loadStockQuotes() {
+            try {
+                const response = await fetch('/api/stock_quotes');
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentData.stockQuotes = data.quotes;
+                    renderStockQuotes(data.quotes);
+                } else {
+                    showError('加载股票报价失败: ' + data.error);
+                }
+            } catch (error) {
+                showError('加载股票报价失败: ' + error.message);
+            }
+        }
+
+        // 渲染股票报价
+        function renderStockQuotes(quotes) {
+            const container = document.getElementById('stockQuotesContainer');
+            
+            if (!quotes || Object.keys(quotes).length === 0) {
+                container.innerHTML = '<div class="no-data">暂无股票报价数据</div>';
+                return;
+            }
+            
+            const tableHtml = `
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>股票代码</th>
+                                <th>股票名称</th>
+                                <th>最新价格</th>
+                                <th>涨跌幅</th>
+                                <th>成交量</th>
+                                <th>成交额</th>
+                                <th>更新时间</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${Object.values(quotes).map(quote => `
+                                <tr>
+                                    <td>${quote.code}</td>
+                                    <td>${quote.name}</td>
+                                    <td>${quote.price}</td>
+                                    <td class="${quote.change_rate >= 0 ? 'status-connected' : 'status-disconnected'}">
+                                        ${quote.change_rate >= 0 ? '+' : ''}${(quote.change_rate * 100).toFixed(2)}%
+                                    </td>
+                                    <td>${formatNumber(quote.volume)}</td>
+                                    <td>${formatNumber(quote.turnover)}</td>
+                                    <td>${new Date(quote.update_time).toLocaleString()}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            
+            container.innerHTML = tableHtml;
+        }
+
+        // 刷新数据
+        function refreshData() {
+            loadInitialData();
+        }
+
+        // 导出数据
+        function exportData() {
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - 7); // 默认导出最近7天
+            const endDate = new Date();
+            
+            const url = `/api/export?start_date=${startDate.toISOString()}&end_date=${endDate.toISOString()}&format=csv`;
+            
+            // 创建下载链接
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `options_export_${new Date().toISOString().split('T')[0]}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // 格式化数字
+        function formatNumber(num) {
+            if (!num) return '0';
+            if (num >= 1000000) {
+                return (num / 1000000).toFixed(1) + 'M';
+            } else if (num >= 1000) {
+                return (num / 1000).toFixed(1) + 'K';
+            }
+            return num.toString();
+        }
+
+        // 显示错误信息
+        function showError(message) {
+            console.error(message);
+            // 可以在这里添加更好的错误显示逻辑
+        }
+
+        // 页面卸载时清理定时器
+        window.addEventListener('beforeunload', function() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+        });
+    </script>
+</body>
+</html>

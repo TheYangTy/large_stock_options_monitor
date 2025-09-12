@@ -364,9 +364,11 @@ def get_big_options_summary():
             # 确保期权类型字段存在
             if 'option_type' not in option or not option['option_type']:
                 option_code = option.get('option_code', '')
-                if 'C' in option_code.upper():
+                from utils.option_code_parser import get_option_type
+                parsed_type = get_option_type(option_code)
+                if parsed_type == 'Call':
                     option['option_type'] = "Call (看涨期权)"
-                elif 'P' in option_code.upper():
+                elif parsed_type == 'Put':
                     option['option_type'] = "Put (看跌期权)"
                 else:
                     option['option_type'] = '未知'
@@ -413,7 +415,7 @@ def get_big_options_summary():
                     except Exception:
                         option['last_turnover'] = 0.0
         except Exception:
-            logger.debug("turnover_diff 计算失败，已忽略", exc_info=True)
+            logger.error("turnover_diff 计算失败，已忽略", exc_info=True)
 
         # 检查数据是否有变化
         current_data_hash = hash(str(summary))

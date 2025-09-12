@@ -20,6 +20,7 @@
                         <th>排名</th>
                         <th>股票代码</th>
                         <th>股票名称</th>
+                        <th>期权类型</th>
                         <th>交易笔数</th>
                         <th>总成交量(张)</th>
                         <th>总成交额(港币)</th>
@@ -39,6 +40,15 @@
                         </td>
                         <td>
                             <strong>{{ stock.stock_name or '-' }}</strong>
+                        </td>
+                        <td>
+                            {% if stock.option_type == 'Call' %}
+                                <span class="badge bg-success">Call</span>
+                            {% elif stock.option_type == 'Put' %}
+                                <span class="badge bg-danger">Put</span>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ stock.option_type }}</span>
+                            {% endif %}
                         </td>
                         <td>{{ "{:,}".format(stock.trade_count or 0) }}</td>
                         <td>{{ "{:,}".format(stock.total_volume or 0) }}</td>
@@ -64,7 +74,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="9" class="text-center text-muted py-4">
+                        <td colspan="10" class="text-center text-muted py-4">
                             <i class="bi bi-inbox"></i> 暂无数据
                         </td>
                     </tr>

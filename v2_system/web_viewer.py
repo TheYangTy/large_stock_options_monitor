@@ -232,7 +232,7 @@ def get_trades_data(page=1, per_page=50, stock_code='', option_code='', date_fro
         return {'trades': [], 'pagination': {}}
 
 def get_stock_stats():
-    """获取股票统计信息"""
+    """获取股票统计信息，按Put和Call分别统计"""
     try:
         with sqlite3.connect(db_manager.db_path) as conn:
             cursor = conn.cursor()
@@ -241,6 +241,11 @@ def get_stock_stats():
                 SELECT 
                     ot.stock_code,
                     COALESCE(si.stock_name, ot.stock_name, '') as stock_name,
+                    CASE 
+                        WHEN ot.option_code LIKE '%C%' THEN 'Call'
+                        WHEN ot.option_code LIKE '%P%' THEN 'Put'
+                        ELSE 'Unknown'
+                    END as option_type,
                     COUNT(*) as trade_count,
                     SUM(ot.volume) as total_volume,
                     SUM(ot.turnover) as total_turnover,
@@ -248,8 +253,8 @@ def get_stock_stats():
                     MAX(ot.timestamp) as latest_trade
                 FROM option_trades ot
                 LEFT JOIN stock_info si ON ot.stock_code = si.stock_code
-                GROUP BY ot.stock_code
-                ORDER BY total_turnover DESC
+                GROUP BY ot.stock_code, option_type
+                ORDER BY ot.stock_code, total_turnover DESC
             """)
             
             stocks = []
@@ -257,11 +262,12 @@ def get_stock_stats():
                 stock = {
                     'stock_code': row[0],
                     'stock_name': row[1],
-                    'trade_count': row[2],
-                    'total_volume': row[3],
-                    'total_turnover': row[4],
-                    'avg_price': round(row[5], 3) if row[5] else 0,
-                    'latest_trade': row[6]
+                    'option_type': row[2],
+                    'trade_count': row[3],
+                    'total_volume': row[4],
+                    'total_turnover': row[5],
+                    'avg_price': round(row[6], 3) if row[6] else 0,
+                    'latest_trade': row[7]
                 }
                 if stock['latest_trade']:
                     stock['formatted_latest'] = datetime.fromisoformat(stock['latest_trade']).strftime('%Y-%m-%d %H:%M:%S')

@@ -21,3 +21,6 @@ data/stock_prices.json
 v2_system/v2_system/data/options_monitor_v2.db
 v2_system/v2_system/data/cache/big_options_v2.json
 v2_system/v2_system/data/cache/options_2025-09-12.json
+v2_system/README.md
+v2_system/config_bak.py
+v2_system/data/options_monitor_v2.db

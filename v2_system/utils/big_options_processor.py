@@ -53,6 +53,11 @@ class BigOptionsProcessor:
     
     def __init__(self):
         self.logger = logging.getLogger('V2OptionMonitor.BigOptionsProcessor')
+        
+        # 初始化数据库管理器
+        from .database_manager import get_database_manager
+        self.db_manager = get_database_manager()
+        
         # 数据现在统一存储在数据库中，不再使用JSON文件
         self.stock_price_cache = {}  # 缓存股价信息
         self.price_cache_time = {}   # 缓存时间
@@ -84,19 +89,7 @@ class BigOptionsProcessor:
             self.logger.error(f"V2从数据库加载当日期权成交量失败: {e}")
             return {}
     
-    def _get_last_recorded_volume(self, option_code: str) -> int:
-        """获取数据库中最后记录的期权成交量"""
-        try:
-            from .database_manager import get_database_manager
-            db_manager = get_database_manager()
-            
-            # 直接从数据库获取当日最新成交量
-            return db_manager.get_today_option_volume(option_code)
-            
-        except Exception as e:
-            self.logger.debug(f"V2从数据库获取{option_code}最后记录成交量失败: {e}")
-            return 0
-    
+
     def _update_today_volume_cache(self, option_code: str, volume: int):
         """更新当日成交量缓存"""
         try:
@@ -782,15 +775,15 @@ class BigOptionsProcessor:
                         # 如果API没有返回或为0，使用解析的价格
                         self.logger.debug(f"V2使用解析执行价格: {option_code} = {strike_price}")
                     
-                    # 从数据库获取今日该期权的最新成交量进行比较
-                    today_latest_volume = self.db_manager.get_today_option_volume(option_code)
+                    # 从数据库获取该期权的上一条记录成交量进行比较
+                    previous_volume = self.db_manager.get_previous_option_volume(option_code, current_volume)
                     
                     # 检查当前数据是否符合大单条件
                     if (current_volume >= BIG_TRADE_CONFIG['min_volume_threshold'] and 
                         current_turnover >= BIG_TRADE_CONFIG['min_turnover_threshold'] and
-                        current_volume != today_latest_volume):
+                        current_volume != previous_volume):
                         
-                        volume_diff = current_volume - today_latest_volume
+                        volume_diff = current_volume - previous_volume
                         
                         # 更新当日成交量缓存
                         self._update_today_volume_cache(option_code, current_volume)
@@ -814,7 +807,7 @@ class BigOptionsProcessor:
                             'price_diff': option_info.get('price_diff', 0),
                             'price_diff_pct': option_info.get('price_diff_pct', 0),
                             'volume_diff': volume_diff,
-                            'last_volume': today_latest_volume
+                            'last_volume': previous_volume
                         }
                         
                         # 获取买卖方向

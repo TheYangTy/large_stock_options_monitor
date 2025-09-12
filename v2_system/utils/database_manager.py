@@ -231,6 +231,32 @@ class V2DatabaseManager:
         except Exception as e:
             self.logger.debug(f"V2获取期权{option_code}当日成交量失败: {e}")
             return 0
+
+    def get_previous_option_volume(self, option_code: str, current_volume: int, trade_date: Optional[str] = None) -> int:
+        """获取指定期权的上一条记录成交量（用于计算正确的变化量）"""
+        try:
+            if trade_date is None:
+                trade_date = datetime.now().date()
+            elif isinstance(trade_date, str):
+                trade_date = datetime.strptime(trade_date, '%Y-%m-%d').date()
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # 获取小于当前成交量的最大成交量记录
+                cursor.execute('''
+                    SELECT volume FROM option_trades 
+                    WHERE option_code = ? AND trade_date = ? AND volume < ?
+                    ORDER BY volume DESC, timestamp DESC
+                    LIMIT 1
+                ''', (option_code, trade_date, current_volume))
+                
+                result = cursor.fetchone()
+                return result[0] if result else 0
+                
+        except Exception as e:
+            self.logger.debug(f"V2获取期权{option_code}上一条记录成交量失败: {e}")
+            return 0
     
     def get_today_all_option_volumes(self, trade_date: Optional[str] = None) -> Dict[str, int]:
         """获取当日所有期权的最新成交量"""
@@ -261,6 +287,37 @@ class V2DatabaseManager:
                 
         except Exception as e:
             self.logger.error(f"V2获取当日所有期权成交量失败: {e}")
+            return {}
+
+    def get_all_previous_option_volumes(self, current_volumes: Dict[str, int], trade_date: Optional[str] = None) -> Dict[str, int]:
+        """批量获取所有期权的上一条记录成交量"""
+        try:
+            if trade_date is None:
+                trade_date = datetime.now().date()
+            elif isinstance(trade_date, str):
+                trade_date = datetime.strptime(trade_date, '%Y-%m-%d').date()
+            
+            result = {}
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                for option_code, current_volume in current_volumes.items():
+                    # 获取小于当前成交量的最大成交量记录
+                    cursor.execute('''
+                        SELECT volume FROM option_trades 
+                        WHERE option_code = ? AND trade_date = ? AND volume < ?
+                        ORDER BY volume DESC, timestamp DESC
+                        LIMIT 1
+                    ''', (option_code, trade_date, current_volume))
+                    
+                    row = cursor.fetchone()
+                    result[option_code] = row[0] if row else 0
+                
+                return result
+                
+        except Exception as e:
+            self.logger.error(f"V2批量获取期权上一条记录成交量失败: {e}")
             return {}
     
     def get_option_trades_by_date(self, trade_date: Optional[str] = None, 

@@ -491,6 +491,33 @@ class V2DatabaseManager:
             return {}
 
 
+    def get_recent_option_trades(self, hours: int = 2) -> List[Dict[str, Any]]:
+        """获取最近几小时的期权交易记录"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                # 计算时间范围
+                cutoff_time = datetime.now() - timedelta(hours=hours)
+                
+                cursor.execute('''
+                    SELECT * FROM option_trades 
+                    WHERE timestamp >= ?
+                    ORDER BY timestamp DESC
+                ''', (cutoff_time.isoformat(),))
+                
+                results = cursor.fetchall()
+                trades = [dict(row) for row in results]
+                
+                self.logger.info(f"V2从数据库获取最近{hours}小时的期权交易记录: {len(trades)}条")
+                return trades
+                
+        except Exception as e:
+            self.logger.error(f"V2获取最近期权交易记录失败: {e}")
+            return []
+
+
 # 全局数据库管理器实例
 _db_manager = None
 

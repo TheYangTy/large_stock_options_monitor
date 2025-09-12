@@ -79,8 +79,9 @@ class V2OptionMonitor:
         
         while self.is_running:
             try:
+                # 只在连接状态为False时才尝试重连，避免过度检查
                 with self.connection_lock:
-                    if not self.is_connected or not self._check_connection():
+                    if not self.is_connected:
                         self.logger.info("V2系统检测到连接断开，尝试重新连接...")
                         if self._connect_futu_internal():
                             self.is_connected = True
@@ -96,52 +97,40 @@ class V2OptionMonitor:
                                 self.is_running = False
                                 break
                 
-                # 每30秒检查一次连接状态
-                time.sleep(30)
+                # 延长检查间隔到2分钟，减少不必要的连接测试
+                time.sleep(120)
                 
             except Exception as e:
                 self.logger.error(f"V2系统连接维护线程异常: {e}")
-                time.sleep(30)
+                time.sleep(60)
         
         self.logger.info("V2系统连接维护线程退出")
     
     def _connect_futu_internal(self) -> bool:
         """内部连接方法（不加锁）"""
         try:
-            # 如果已有连接，先测试是否可用
+            # 如果已有连接，直接使用，不进行额外测试
             if self.quote_ctx:
-                try:
-                    ret, data = self.quote_ctx.get_market_snapshot(['HK.00700'])
-                    if ret == ft.RET_OK:
-                        self.logger.debug("V2系统现有连接仍然可用")
-                        return True
-                    else:
-                        self.logger.info("V2系统现有连接已失效，需要重新连接")
-                        self.quote_ctx.close()
-                except:
-                    self.logger.info("V2系统现有连接测试失败，需要重新连接")
-                    try:
-                        self.quote_ctx.close()
-                    except:
-                        pass
+                self.logger.debug("V2系统使用现有连接")
+                return True
             
             # 建立新连接
+            self.logger.info("V2系统建立新的富途连接...")
             self.quote_ctx = ft.OpenQuoteContext(
                 host=FUTU_CONFIG['host'], 
                 port=FUTU_CONFIG['port']
             )
-            
-            # 测试新连接
-            ret, data = self.quote_ctx.get_market_snapshot(['HK.00700'])
-            if ret == ft.RET_OK:
-                self.logger.info(f"V2系统富途OpenD连接成功: {FUTU_CONFIG['host']}:{FUTU_CONFIG['port']}")
-                return True
-            else:
-                self.logger.warning(f"V2系统富途OpenD连接测试失败: {ret}")
-                return False
+            return True
                 
         except Exception as e:
             self.logger.warning(f"V2系统连接富途OpenD失败: {e}")
+            # 异常时确保清理连接
+            try:
+                if self.quote_ctx:
+                    self.quote_ctx.close()
+                    self.quote_ctx = None
+            except:
+                pass
             return False
     
     def connect_futu(self, max_retries: int = 3, retry_delay: int = 5) -> bool:
@@ -160,13 +149,20 @@ class V2OptionMonitor:
         
         while self.is_running:
             try:
-                # 检查连接状态
-                with self.connection_lock:
-                    if self.is_connected and self._check_connection():
+                # 检查连接状态，但不过度测试
+                if self.is_connected and self.quote_ctx:
+                    try:
                         # 执行数据扫描
                         self.scan_big_options()
-                    else:
-                        self.logger.warning("V2系统连接不可用，跳过本次轮询")
+                    except Exception as scan_error:
+                        self.logger.error(f"V2系统扫描异常: {scan_error}")
+                        # 如果是连接相关错误，标记连接失效
+                        if "连接" in str(scan_error) or "connection" in str(scan_error).lower():
+                            with self.connection_lock:
+                                self.is_connected = False
+                                self.logger.warning("V2系统扫描时检测到连接问题，标记连接失效")
+                else:
+                    self.logger.warning("V2系统连接不可用，跳过本次轮询")
                 
                 # 等待2分钟
                 for _ in range(120):  # 120秒 = 2分钟
@@ -231,6 +227,11 @@ class V2OptionMonitor:
             if not self.ensure_connection():
                 self.logger.error("V2系统富途连接不可用，跳过本次扫描")
                 return []
+            
+            # 第一次扫描时确保已加载历史数据
+            if self.scan_count == 1 and not self.previous_options:
+                self.logger.info("V2系统第一次扫描，加载历史数据进行diff比较")
+                self.load_previous_options()
             
             # 获取大单期权
             big_options = self.big_options_processor.get_recent_big_options(
@@ -409,7 +410,7 @@ class V2OptionMonitor:
             for option in big_options_with_diff:
                 stock_code = option.get('stock_code', '')
                 stock_name = option.get('stock_name', '')
-                amount = option.get('amount', 0)
+                amount = option.get('turnover', 0)  # 使用turnover字段作为金额
                 
                 if stock_code not in stock_summary:
                     stock_summary[stock_code] = {
@@ -452,7 +453,7 @@ class V2OptionMonitor:
                     price = opt.get('price', 0)
                     volume = opt.get('volume', 0)
                     volume_diff = opt.get('volume_diff', 0)
-                    amount = opt.get('amount', 0)
+                    amount = opt.get('turnover', 0)  # 使用turnover字段作为金额
                     
                     report_lines.append(
                         f"  {i}. {option_code}: {option_type}, "

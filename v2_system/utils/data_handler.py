@@ -132,12 +132,10 @@ class V2DataHandler:
         try:
             if hours:
                 # 按小时加载
-                cutoff_time = datetime.now() - timedelta(hours=hours)
                 all_data = self.db_manager.get_recent_option_trades(hours=hours)
             else:
-                # 按天加载
-                cutoff_time = datetime.now() - timedelta(days=days)
-                all_data = self.db_manager.get_recent_option_trades(days=days)
+                # 按天加载（转换为小时）
+                all_data = self.db_manager.get_recent_option_trades(hours=days*24)
             
             self.logger.info(f"V2从数据库加载最近期权数据: {len(all_data)}条记录")
             return all_data

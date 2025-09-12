@@ -14,7 +14,7 @@ import os
 
 # 添加V2系统路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import NOTIFICATION
+from config import NOTIFICATION, should_send_to_extra_webhooks
 from .mac_notifier import MacNotifier
 from .database_manager import V2DatabaseManager
 
@@ -65,13 +65,17 @@ class V2Notifier:
                 if result.get('errcode') == 0:
                     self.logger.info("V2企业微信通知发送成功")
                     
-                    # 发送到额外的webhook URL
-                    extra_urls = wework_config.get('extra_webhook_urls', [])
-                    for extra_url in extra_urls:
-                        try:
-                            requests.post(extra_url, json=data, timeout=5)
-                        except Exception as e:
-                            self.logger.warning(f"V2额外webhook发送失败: {e}")
+                    # 只在开市时间向额外的webhook URL发送消息
+                    if should_send_to_extra_webhooks():
+                        extra_urls = wework_config.get('extra_webhook_urls', [])
+                        for extra_url in extra_urls:
+                            try:
+                                requests.post(extra_url, json=data, timeout=5)
+                                self.logger.info(f"V2额外webhook发送成功: {extra_url}")
+                            except Exception as e:
+                                self.logger.warning(f"V2额外webhook发送失败: {e}")
+                    else:
+                        self.logger.info("V2非开市时间，跳过额外webhook发送")
                     
                     return True
                 else:

@@ -20,11 +20,11 @@ from utils.logger import setup_logger
 
 
 class VolumeFixProcessor:
-    """变化量修正处理器"""
+    """变化量和股票名称修正处理器"""
     
     def __init__(self):
         self.logger = setup_logger('VolumeFixProcessor')
-        self.db_path = DATABASE_CONFIG['path']
+        self.db_path = DATABASE_CONFIG['db_path']
         
     def get_all_trades_by_date(self) -> Dict[str, List[Tuple]]:
         """获取所有交易记录，按日期分组"""
@@ -117,12 +117,17 @@ class VolumeFixProcessor:
             self.logger.error(f"更新数据库失败: {e}")
             return False
     
-    def fix_all_volume_diff(self) -> bool:
-        """修正所有变化量"""
+    def fix_all_data(self) -> bool:
+        """修正所有数据（变化量和股票名称）"""
         try:
-            self.logger.info("开始修正数据库中的变化量...")
+            self.logger.info("开始修正数据库中的数据...")
             
-            # 1. 获取所有交易记录
+            # 1. 修正变化量
+            self.logger.info("=" * 50)
+            self.logger.info("第一步：修正变化量")
+            self.logger.info("=" * 50)
+            
+            # 获取所有交易记录
             trades_by_date = self.get_all_trades_by_date()
             if not trades_by_date:
                 self.logger.warning("没有找到交易记录")
@@ -131,27 +136,112 @@ class VolumeFixProcessor:
             total_records = sum(len(records) for records in trades_by_date.values())
             self.logger.info(f"共找到 {total_records} 条交易记录，涉及 {len(trades_by_date)} 个交易日")
             
-            # 2. 计算正确的变化量
-            updates = self.calculate_correct_volume_diff(trades_by_date)
+            # 计算正确的变化量
+            volume_updates = self.calculate_correct_volume_diff(trades_by_date)
             
-            if not updates:
-                self.logger.info("所有记录的变化量都是正确的，无需更新")
-                return True
-            
-            self.logger.info(f"需要更新 {len(updates)} 条记录")
-            
-            # 3. 更新数据库
-            success = self.update_database(updates)
-            
-            if success:
-                self.logger.info("变化量修正完成！")
+            if volume_updates:
+                self.logger.info(f"需要更新 {len(volume_updates)} 条记录的变化量")
+                volume_success = self.update_database(volume_updates)
+                if volume_success:
+                    self.logger.info("✅ 变化量修正完成！")
+                else:
+                    self.logger.error("❌ 变化量修正失败！")
+                    return False
             else:
-                self.logger.error("变化量修正失败！")
+                self.logger.info("✅ 所有记录的变化量都是正确的，无需更新")
+                volume_success = True
             
-            return success
+            # 2. 修正股票名称
+            self.logger.info("=" * 50)
+            self.logger.info("第二步：修正股票名称")
+            self.logger.info("=" * 50)
+            
+            name_success = self.fix_stock_names()
+            if name_success:
+                self.logger.info("✅ 股票名称修正完成！")
+            else:
+                self.logger.error("❌ 股票名称修正失败！")
+            
+            return volume_success and name_success
             
         except Exception as e:
-            self.logger.error(f"修正变化量过程中出错: {e}")
+            self.logger.error(f"修正数据过程中出错: {e}")
+            return False
+    
+    def get_stock_names_from_stock_info(self) -> Dict[str, str]:
+        """从stock_info表获取股票名称映射"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT stock_code, stock_name 
+                    FROM stock_info 
+                    WHERE stock_name IS NOT NULL AND stock_name != ''
+                """)
+                
+                results = cursor.fetchall()
+                stock_names = {stock_code: stock_name for stock_code, stock_name in results}
+                
+                self.logger.info(f"从stock_info表获取到 {len(stock_names)} 个股票名称")
+                return stock_names
+                
+        except Exception as e:
+            self.logger.error(f"获取股票名称映射失败: {e}")
+            return {}
+    
+    def fix_stock_names(self) -> bool:
+        """修正option_trades表中的股票名称"""
+        try:
+            self.logger.info("开始修正股票名称...")
+            
+            # 获取股票名称映射
+            stock_names = self.get_stock_names_from_stock_info()
+            if not stock_names:
+                self.logger.warning("没有找到股票名称数据")
+                return False
+            
+            # 查找需要更新的记录
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # 找出股票名称为空或'-'的记录，且在stock_info中有对应名称的
+                placeholders = ','.join(['?' for _ in stock_names.keys()])
+                cursor.execute(f"""
+                    SELECT DISTINCT stock_code 
+                    FROM option_trades 
+                    WHERE (stock_name IS NULL OR stock_name = '' OR stock_name = '-')
+                    AND stock_code IN ({placeholders})
+                """, list(stock_names.keys()))
+                
+                codes_to_update = [row[0] for row in cursor.fetchall()]
+                
+                if not codes_to_update:
+                    self.logger.info("所有股票名称都已正确，无需更新")
+                    return True
+                
+                self.logger.info(f"需要更新 {len(codes_to_update)} 个股票代码的名称")
+                
+                # 批量更新股票名称
+                updates = []
+                for stock_code in codes_to_update:
+                    stock_name = stock_names[stock_code]
+                    updates.append((stock_name, stock_code))
+                
+                cursor.executemany("""
+                    UPDATE option_trades 
+                    SET stock_name = ?
+                    WHERE stock_code = ? AND (stock_name IS NULL OR stock_name = '' OR stock_name = '-')
+                """, updates)
+                
+                updated_count = cursor.rowcount
+                conn.commit()
+                
+                self.logger.info(f"成功更新 {updated_count} 条记录的股票名称")
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"修正股票名称失败: {e}")
             return False
     
     def verify_fix(self) -> bool:
@@ -166,14 +256,30 @@ class VolumeFixProcessor:
                     WHERE volume_diff < 0 OR volume_diff > volume
                 """)
                 
-                abnormal_count = cursor.fetchone()[0]
+                abnormal_volume_count = cursor.fetchone()[0]
                 
-                if abnormal_count > 0:
-                    self.logger.warning(f"仍有 {abnormal_count} 条记录的变化量可能异常")
-                    return False
+                # 检查是否还有空的股票名称
+                cursor.execute("""
+                    SELECT COUNT(*) FROM option_trades 
+                    WHERE stock_name IS NULL OR stock_name = '' OR stock_name = '-'
+                """)
+                
+                empty_name_count = cursor.fetchone()[0]
+                
+                success = True
+                if abnormal_volume_count > 0:
+                    self.logger.warning(f"仍有 {abnormal_volume_count} 条记录的变化量可能异常")
+                    success = False
                 else:
                     self.logger.info("所有记录的变化量都正常")
-                    return True
+                
+                if empty_name_count > 0:
+                    self.logger.warning(f"仍有 {empty_name_count} 条记录的股票名称为空")
+                    success = False
+                else:
+                    self.logger.info("所有记录的股票名称都已填充")
+                
+                return success
                     
         except Exception as e:
             self.logger.error(f"验证修正结果失败: {e}")
@@ -183,31 +289,39 @@ class VolumeFixProcessor:
 def main():
     """主函数"""
     print("=" * 60)
-    print("期权交易记录变化量修正工具")
+    print("期权交易记录数据修正工具")
+    print("=" * 60)
+    print("功能：")
+    print("1. 修正变化量计算（与上一条记录比较）")
+    print("2. 修正股票名称（从stock_info表补充）")
     print("=" * 60)
     
     processor = VolumeFixProcessor()
     
     # 询问用户确认
-    confirm = input("是否要修正数据库中所有期权交易记录的变化量？(y/N): ")
+    confirm = input("是否要修正数据库中所有期权交易记录的数据？(y/N): ")
     if confirm.lower() != 'y':
         print("操作已取消")
         return
     
     # 执行修正
-    success = processor.fix_all_volume_diff()
+    success = processor.fix_all_data()
     
     if success:
-        print("\n✅ 变化量修正成功！")
+        print("\n" + "=" * 60)
+        print("✅ 数据修正成功！")
+        print("=" * 60)
         
         # 验证结果
         print("正在验证修正结果...")
         if processor.verify_fix():
-            print("✅ 验证通过，所有记录的变化量都正确")
+            print("✅ 验证通过，所有数据都正确")
         else:
             print("⚠️  验证发现异常，请检查日志")
     else:
-        print("\n❌ 变化量修正失败，请检查日志")
+        print("\n" + "=" * 60)
+        print("❌ 数据修正失败，请检查日志")
+        print("=" * 60)
 
 
 if __name__ == "__main__":

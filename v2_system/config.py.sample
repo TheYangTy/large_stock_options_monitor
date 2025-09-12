@@ -111,12 +111,10 @@ NOTIFICATION = {
     },
     
     # 企业微信机器人通知
-    'enable_wework_bot': True,
+    'enable_wework_bot': False,
     'wework_config': {
-        'webhook_url': 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=a478c69a-6b62-4b29-b22f-bdf649f53eed',  # 主要webhook URL
-        'extra_webhook_urls': [
-            'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=4211726d-315c-41b0-96a2-ceefb5f31b2d'
-        ],  # 额外的webhook URL列表
+        'webhook_url': '',  # 主要webhook URL
+        'extra_webhook_urls': [],  # 额外的webhook URL列表
         'mentioned_list': [],  # @用户列表
         'mentioned_mobile_list': [],  # @手机号列表
         'enable_summary': True,  # 启用汇总通知
@@ -128,10 +126,6 @@ NOTIFICATION = {
     'max_notifications_per_hour': 100,  # 每小时最大通知数
 }
 
-#         'extra_webhook_urls': [
-#             'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=4211726d-315c-41b0-96a2-ceefb5f31b2d'
-#         ],  # 额外的webhook URL列表
-# 'webhook_url': 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=a478c69a-6b62-4b29-b22f-bdf649f53eed',  # 主要webhook URL
 # ==================== 交易时间配置 ====================
 TRADING_HOURS = {
     'market_open': '09:30',

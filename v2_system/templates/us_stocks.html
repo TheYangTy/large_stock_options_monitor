@@ -1,18 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}{{ market_name }}统计 - V2期权监控数据库{% endblock %}
+{% block title %}美股统计 - V2期权监控数据库{% endblock %}
 
 {% block content %}
 <div class="row">
     <div class="col-12">
         <h1 class="mb-4">
-            {% if market == 'US' %}
-                <i class="bi bi-flag-usa"></i> 美股期权统计
-                <span class="badge bg-info ms-2">US Market</span>
-            {% else %}
-                <i class="bi bi-flag"></i> 港股期权统计
-                <span class="badge bg-primary ms-2">HK Market</span>
-            {% endif %}
+            <i class="bi bi-flag-usa"></i> 美股期权统计
+            <span class="badge bg-primary ms-2">US Market</span>
         </h1>
     </div>
 </div>
@@ -22,12 +17,12 @@
         <nav aria-label="市场切换">
             <ul class="nav nav-pills">
                 <li class="nav-item">
-                    <a class="nav-link {{ 'active' if market == 'HK' else '' }}" href="{{ url_for('stocks', market='HK') }}">
+                    <a class="nav-link" href="{{ url_for('stocks', market='HK') }}">
                         <i class="bi bi-flag"></i> 港股期权
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link {{ 'active' if market == 'US' else '' }}" href="{{ url_for('stocks', market='US') }}">
+                    <a class="nav-link active" href="{{ url_for('stocks', market='US') }}">
                         <i class="bi bi-flag-usa"></i> 美股期权
                     </a>
                 </li>
@@ -48,7 +43,7 @@
                         <th>期权类型</th>
                         <th>交易笔数</th>
                         <th>总成交量(张)</th>
-                        <th>总成交额({{ currency }})</th>
+                        <th>总成交额(美元)</th>
                         <th>平均价格</th>
                         <th>最新交易时间</th>
                         <th>操作</th>
@@ -61,11 +56,7 @@
                             <span class="badge bg-secondary">{{ loop.index }}</span>
                         </td>
                         <td>
-                            {% if market == 'US' %}
-                                <span class="badge bg-info">{{ stock.stock_code }}</span>
-                            {% else %}
-                                <span class="badge bg-primary">{{ stock.stock_code }}</span>
-                            {% endif %}
+                            <span class="badge bg-info">{{ stock.stock_code }}</span>
                         </td>
                         <td>
                             <strong>{{ stock.stock_name or '-' }}</strong>
@@ -83,20 +74,10 @@
                         <td>{{ "{:,}".format(stock.total_volume or 0) }}</td>
                         <td>
                             <span class="text-success fw-bold">
-                                {% if market == 'US' %}
-                                    ${{ "{:,.0f}".format(stock.total_turnover or 0) }}
-                                {% else %}
-                                    {{ "{:,.0f}".format(stock.total_turnover or 0) }}
-                                {% endif %}
+                                ${{ "{:,.0f}".format(stock.total_turnover or 0) }}
                             </span>
                         </td>
-                        <td>
-                            {% if market == 'US' %}
-                                ${{ "%.3f"|format(stock.avg_price or 0) }}
-                            {% else %}
-                                {{ "%.3f"|format(stock.avg_price or 0) }}
-                            {% endif %}
-                        </td>
+                        <td>${{ "%.3f"|format(stock.avg_price or 0) }}</td>
                         <td>
                             {% if stock.formatted_latest %}
                                 <small>{{ stock.formatted_latest }}</small>
@@ -105,7 +86,7 @@
                             {% endif %}
                         </td>
                         <td>
-                            <a href="{{ url_for('trades', market=market, stock_code=stock.stock_code) }}" 
+                            <a href="{{ url_for('trades', market='US', stock_code=stock.stock_code) }}" 
                                class="btn btn-sm btn-outline-primary">
                                 <i class="bi bi-eye"></i> 查看
                             </a>
@@ -114,7 +95,7 @@
                     {% else %}
                     <tr>
                         <td colspan="10" class="text-center text-muted py-4">
-                            <i class="bi bi-inbox"></i> 暂无{{ market_name }}期权数据
+                            <i class="bi bi-inbox"></i> 暂无美股期权数据
                         </td>
                     </tr>
                     {% endfor %}
@@ -128,7 +109,7 @@
 <div class="row mt-4">
     <div class="col-md-4">
         <div class="card">
-            <div class="card-header">
+            <div class="card-header bg-info text-white">
                 <h6 class="mb-0">成交额排行榜 TOP 5</h6>
             </div>
             <div class="card-body">
@@ -141,11 +122,7 @@
                     </div>
                     <div class="text-end">
                         <span class="text-success fw-bold">
-                            {% if market == 'US' %}
-                                ${{ "{:,.0f}".format(stock.total_turnover or 0) }}
-                            {% else %}
-                                {{ "{:,.0f}".format(stock.total_turnover or 0) }}
-                            {% endif %}
+                            ${{ "{:,.0f}".format(stock.total_turnover or 0) }}
                         </span>
                     </div>
                 </div>
@@ -157,7 +134,7 @@
     
     <div class="col-md-4">
         <div class="card">
-            <div class="card-header">
+            <div class="card-header bg-info text-white">
                 <h6 class="mb-0">交易笔数排行榜 TOP 5</h6>
             </div>
             <div class="card-body">
@@ -182,7 +159,7 @@
     
     <div class="col-md-4">
         <div class="card">
-            <div class="card-header">
+            <div class="card-header bg-info text-white">
                 <h6 class="mb-0">成交量排行榜 TOP 5</h6>
             </div>
             <div class="card-body">
@@ -206,11 +183,26 @@
     </div>
 </div>
 {% endif %}
+
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle"></i>
+            <strong>美股期权说明：</strong>
+            <ul class="mb-0 mt-2">
+                <li>成交额以美元计价</li>
+                <li>交易时间为美东时间，显示时间已转换为北京时间</li>
+                <li>期权代码格式遵循美股期权标准</li>
+                <li>数据来源于富途API美股期权接口</li>
+            </ul>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-// 自动刷新股票统计（每2分钟）
+// 自动刷新美股统计（每2分钟）
 function refreshStocks() {
     window.location.reload();
 }

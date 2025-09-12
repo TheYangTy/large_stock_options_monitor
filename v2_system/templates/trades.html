@@ -1,24 +1,49 @@
 {% extends "base.html" %}
 
-{% block title %}交易记录 - V2期权监控数据库{% endblock %}
+{% block title %}{{ market_name }}交易记录 - V2期权监控数据库{% endblock %}
 
 {% block content %}
 <div class="row">
     <div class="col-12">
         <h1 class="mb-4">
-            <i class="bi bi-list-ul"></i> 期权交易记录
+            {% if market == 'US' %}
+                <i class="bi bi-flag-usa"></i> 美股期权交易记录
+                <span class="badge bg-info ms-2">US Market</span>
+            {% else %}
+                <i class="bi bi-flag"></i> 港股期权交易记录
+                <span class="badge bg-primary ms-2">HK Market</span>
+            {% endif %}
         </h1>
+    </div>
+</div>
+
+<div class="row mb-3">
+    <div class="col-12">
+        <nav aria-label="市场切换">
+            <ul class="nav nav-pills">
+                <li class="nav-item">
+                    <a class="nav-link {{ 'active' if market == 'HK' else '' }}" href="{{ url_for('trades', market='HK') }}">
+                        <i class="bi bi-flag"></i> 港股交易
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ 'active' if market == 'US' else '' }}" href="{{ url_for('trades', market='US') }}">
+                        <i class="bi bi-flag-usa"></i> 美股交易
+                    </a>
+                </li>
+            </ul>
+        </nav>
     </div>
 </div>
 
 <!-- 筛选表单 -->
 <div class="filter-form">
-    <form method="GET" action="{{ url_for('trades') }}">
+    <form method="GET" action="{{ url_for('trades', market=market) }}">
         <div class="row">
             <div class="col-md-3 mb-3">
                 <label for="stock_code" class="form-label">股票代码</label>
                 <input type="text" class="form-control" id="stock_code" name="stock_code" 
-                       value="{{ filters.stock_code }}" placeholder="如: HK.00700">
+                       value="{{ filters.stock_code }}" placeholder="{% if market == 'US' %}如: US.AAPL{% else %}如: HK.00700{% endif %}">
             </div>
             <div class="col-md-3 mb-3">
                 <label for="option_code" class="form-label">期权代码</label>
@@ -41,7 +66,7 @@
                     <button type="submit" class="btn btn-primary">
                         <i class="bi bi-search"></i> 搜索
                     </button>
-                    <a href="{{ url_for('trades') }}" class="btn btn-outline-secondary">
+                    <a href="{{ url_for('trades', market=market) }}" class="btn btn-outline-secondary">
                         <i class="bi bi-arrow-clockwise"></i> 重置
                     </a>
                 </div>

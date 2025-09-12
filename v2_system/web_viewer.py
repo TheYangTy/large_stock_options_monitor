@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-V2系统数据库浏览器 - Flask Web应用
-用于查看和查询数据库中的期权交易数据
+V2系统多市场数据库浏览器 - Flask Web应用
+用于查看和查询港股和美股期权交易数据
 """
 
 import os
@@ -16,22 +16,31 @@ import json
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import DATABASE_CONFIG
-from utils.database_manager import V2DatabaseManager
+from config import get_database_config
+from utils.database_manager import get_database_manager
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'v2_option_monitor_secret_key'
 
 # 初始化数据库管理器
-db_manager = V2DatabaseManager()
+hk_db_manager = get_database_manager('HK')
+us_db_manager = get_database_manager('US')
+
+def get_db_manager(market='HK'):
+    """根据市场获取数据库管理器"""
+    return us_db_manager if market == 'US' else hk_db_manager
 
 @app.route('/')
 def index():
     """主页 - 显示数据概览"""
     try:
-        # 获取数据统计
-        stats = get_database_stats()
-        return render_template('index.html', stats=stats)
+        # 获取港股和美股统计
+        hk_stats = get_database_stats('HK')
+        us_stats = get_database_stats('US')
+        
+        return render_template('index.html', 
+                             hk_stats=hk_stats, 
+                             us_stats=us_stats)
     except Exception as e:
         return f"错误: {str(e)}"
 
@@ -39,13 +48,15 @@ def index():
 def api_stats():
     """API - 获取数据库统计信息"""
     try:
-        stats = get_database_stats()
+        market = request.args.get('market', 'HK')
+        stats = get_database_stats(market)
         return jsonify(stats)
     except Exception as e:
         return jsonify({'error': str(e)})
 
 @app.route('/trades')
-def trades():
+@app.route('/trades/<market>')
+def trades(market='HK'):
     """交易记录页面"""
     try:
         # 获取查询参数
@@ -57,11 +68,14 @@ def trades():
         date_to = request.args.get('date_to', '')
         
         # 查询数据
-        trades_data = get_trades_data(page, per_page, stock_code, option_code, date_from, date_to)
+        trades_data = get_trades_data(market, page, per_page, stock_code, option_code, date_from, date_to)
         
         return render_template('trades.html', 
                              trades=trades_data['trades'],
                              pagination=trades_data['pagination'],
+                             market=market,
+                             market_name='港股' if market == 'HK' else '美股',
+                             currency='港币' if market == 'HK' else '美元',
                              filters={
                                  'stock_code': stock_code,
                                  'option_code': option_code,
@@ -72,7 +86,8 @@ def trades():
         return f"错误: {str(e)}"
 
 @app.route('/api/trades')
-def api_trades():
+@app.route('/api/trades/<market>')
+def api_trades(market='HK'):
     """API - 获取交易记录"""
     try:
         page = int(request.args.get('page', 1))
@@ -82,32 +97,50 @@ def api_trades():
         date_from = request.args.get('date_from', '')
         date_to = request.args.get('date_to', '')
         
-        trades_data = get_trades_data(page, per_page, stock_code, option_code, date_from, date_to)
+        trades_data = get_trades_data(market, page, per_page, stock_code, option_code, date_from, date_to)
         return jsonify(trades_data)
     except Exception as e:
         return jsonify({'error': str(e)})
 
 @app.route('/stocks')
-def stocks():
+@app.route('/stocks/<market>')
+def stocks(market='HK'):
     """股票统计页面"""
     try:
-        stock_stats = get_stock_stats()
-        return render_template('stocks.html', stocks=stock_stats)
+        stock_stats = get_stock_stats(market)
+        return render_template('stocks.html', 
+                             stocks=stock_stats,
+                             market=market,
+                             market_name='港股' if market == 'HK' else '美股',
+                             currency='港币' if market == 'HK' else '美元')
     except Exception as e:
         return f"错误: {str(e)}"
 
 @app.route('/api/stocks')
-def api_stocks():
+@app.route('/api/stocks/<market>')
+def api_stocks(market='HK'):
     """API - 获取股票统计"""
     try:
-        stock_stats = get_stock_stats()
+        stock_stats = get_stock_stats(market)
         return jsonify(stock_stats)
     except Exception as e:
         return jsonify({'error': str(e)})
 
-def get_database_stats():
+# 美股专用路由
+@app.route('/us_stocks')
+def us_stocks():
+    """美股统计页面"""
+    return stocks('US')
+
+@app.route('/us_trades')
+def us_trades():
+    """美股交易记录页面"""
+    return trades('US')
+
+def get_database_stats(market='HK'):
     """获取数据库统计信息"""
     try:
+        db_manager = get_db_manager(market)
         with sqlite3.connect(db_manager.db_path) as conn:
             cursor = conn.cursor()
             
@@ -137,6 +170,9 @@ def get_database_stats():
             total_turnover = cursor.fetchone()[0] or 0
             
             return {
+                'market': market,
+                'market_name': '港股' if market == 'HK' else '美股',
+                'currency': '港币' if market == 'HK' else '美元',
                 'total_trades': total_trades,
                 'today_trades': today_trades,
                 'stock_count': stock_count,
@@ -147,12 +183,25 @@ def get_database_stats():
                 'database_path': db_manager.db_path
             }
     except Exception as e:
-        print(f"获取统计信息失败: {e}")
-        return {}
+        print(f"获取{market}市场统计信息失败: {e}")
+        return {
+            'market': market,
+            'market_name': '港股' if market == 'HK' else '美股',
+            'currency': '港币' if market == 'HK' else '美元',
+            'total_trades': 0,
+            'today_trades': 0,
+            'stock_count': 0,
+            'option_count': 0,
+            'total_turnover': 0,
+            'earliest_record': None,
+            'latest_record': None,
+            'database_path': ''
+        }
 
-def get_trades_data(page=1, per_page=50, stock_code='', option_code='', date_from='', date_to=''):
+def get_trades_data(market='HK', page=1, per_page=50, stock_code='', option_code='', date_from='', date_to=''):
     """获取交易记录数据"""
     try:
+        db_manager = get_db_manager(market)
         with sqlite3.connect(db_manager.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -228,12 +277,13 @@ def get_trades_data(page=1, per_page=50, stock_code='', option_code='', date_fro
                 }
             }
     except Exception as e:
-        print(f"获取交易数据失败: {e}")
+        print(f"获取{market}市场交易数据失败: {e}")
         return {'trades': [], 'pagination': {}}
 
-def get_stock_stats():
+def get_stock_stats(market='HK'):
     """获取股票统计信息，按Put和Call分别统计"""
     try:
+        db_manager = get_db_manager(market)
         with sqlite3.connect(db_manager.db_path) as conn:
             cursor = conn.cursor()
             
@@ -275,7 +325,7 @@ def get_stock_stats():
             
             return stocks
     except Exception as e:
-        print(f"获取股票统计失败: {e}")
+        print(f"获取{market}市场股票统计失败: {e}")
         return []
 
 if __name__ == '__main__':
@@ -283,8 +333,9 @@ if __name__ == '__main__':
     template_dir = os.path.join(os.path.dirname(__file__), 'templates')
     os.makedirs(template_dir, exist_ok=True)
     
-    print("V2期权监控数据库浏览器启动中...")
-    print(f"数据库路径: {db_manager.db_path}")
+    print("V2多市场期权监控数据库浏览器启动中...")
+    print(f"港股数据库: {hk_db_manager.db_path}")
+    print(f"美股数据库: {us_db_manager.db_path}")
     print("访问地址: http://localhost:5001")
     
     app.run(debug=True, host='0.0.0.0', port=5001)

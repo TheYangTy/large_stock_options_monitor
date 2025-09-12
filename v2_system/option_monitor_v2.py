@@ -44,12 +44,13 @@ from utils.big_options_processor import BigOptionsProcessor
 
 
 class V2OptionMonitor:
-    """V2系统港股期权大单监控器"""
+    """V2系统多市场期权大单监控器"""
     
-    def __init__(self):
-        self.logger = setup_logger('V2OptionMonitor')
+    def __init__(self, market: str = 'HK'):
+        self.market = market
+        self.logger = setup_logger(f'V2OptionMonitor.{market}')
         self.notifier = V2Notifier()
-        self.data_handler = V2DataHandler()
+        self.data_handler = V2DataHandler(market)
         self.mac_notifier = MacNotifier()
         self.big_options_processor = BigOptionsProcessor()
         self.quote_ctx = None
@@ -207,9 +208,16 @@ class V2OptionMonitor:
             else:
                 # 使用默认价格
                 default_prices = {
+                    # 港股默认价格
                     'HK.00700': 600.0, 'HK.09988': 80.0, 'HK.03690': 120.0,
                     'HK.01810': 15.0, 'HK.09618': 120.0, 'HK.02318': 40.0,
-                    'HK.00388': 300.0, 'HK.00981': 60.0, 'HK.01024': 50.0
+                    'HK.00388': 300.0, 'HK.00981': 60.0, 'HK.01024': 50.0,
+                    
+                    # 美股默认价格
+                    'US.AAPL': 180.0, 'US.MSFT': 350.0, 'US.GOOGL': 140.0,
+                    'US.AMZN': 140.0, 'US.TSLA': 250.0, 'US.META': 300.0,
+                    'US.NVDA': 450.0, 'US.NFLX': 400.0, 'US.AMD': 120.0,
+                    'US.CRM': 200.0
                 }
                 return default_prices.get(stock_code, 100.0)
                 
@@ -280,30 +288,16 @@ class V2OptionMonitor:
         return
     
     def is_trading_time(self) -> bool:
-        """检查是否在交易时间"""
+        """检查是否在交易时间（支持多市场）"""
         try:
-            now = datetime.now()
-            current_time = now.strftime('%H:%M')
+            from config import is_market_trading_time
             
-            # 检查是否是工作日（周一到周五）
-            if now.weekday() >= 5:  # 周六日
-                return False
+            # 检查港股或美股是否有任一市场在交易时间
+            hk_trading = is_market_trading_time('HK')
+            us_trading = is_market_trading_time('US')
             
-            # 检查是否在交易时间段
-            market_open = TRADING_HOURS['market_open']
-            market_close = TRADING_HOURS['market_close']
-            lunch_start = TRADING_HOURS['lunch_break_start']
-            lunch_end = TRADING_HOURS['lunch_break_end']
-            
-            # 上午时段：09:30-12:00
-            if market_open <= current_time < lunch_start:
-                return True
-            
-            # 下午时段：13:00-16:00
-            if lunch_end <= current_time < market_close:
-                return True
-            
-            return False
+            # 任一市场在交易时间就返回True
+            return hk_trading or us_trading
             
         except Exception as e:
             self.logger.error(f"V2系统检查交易时间失败: {e}")

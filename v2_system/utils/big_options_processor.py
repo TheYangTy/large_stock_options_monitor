@@ -206,13 +206,16 @@ class BigOptionsProcessor:
                                 self.logger.warning(f"V2连续错误超过3次，跳过{stock_code}剩余期权")
                                 break
                                 
+                            # 🔥 修改：_get_option_big_trades 现在会保存所有期权数据，只返回满足大单条件的
                             option_big_trades = self._get_option_big_trades(quote_ctx, option_code, stock_code, option_monitor)
                             if option_big_trades:
-                                # 检查是否需要通知
+                                # 🔥 修改：对返回的大单期权再次进行通知过滤
                                 for trade in option_big_trades:
                                     if self._should_notify(trade):
                                         stock_big_options.append(trade)
-                                        self.logger.info(f"V2期权 {j+1}/{len(option_codes)}: {option_code} 发现 {len(option_big_trades)} 笔大单")
+                                        self.logger.info(f"V2期权 {j+1}/{len(option_codes)}: {option_code} 发现大单并符合通知条件")
+                                    else:
+                                        self.logger.debug(f"V2期权 {option_code} 是大单但不符合通知条件（冷却期内）")
                                 error_count = 0
                             
                             # 每处理5个期权暂停一下
@@ -554,9 +557,14 @@ class BigOptionsProcessor:
     
     @retry_on_api_error(max_retries=3)
     def _get_option_codes(self, quote_ctx, stock_code: str, option_monitor=None) -> List[str]:
-        """V2系统获取期权代码列表"""
+        """V2系统获取期权代码列表 - 支持港股和美股"""
         try:
             option_codes = []
+            
+            # 判断市场类型
+            from config import get_market_type
+            market_type = get_market_type(stock_code)
+            self.logger.info(f"V2 {stock_code} 市场类型: {market_type}")
             
             # 获取当前股价
             try:
@@ -578,11 +586,18 @@ class BigOptionsProcessor:
                         self.logger.info(f"V2 {stock_code}当前股价(来自文件缓存): {current_price}")
                     else:
                         # 使用默认价格
-                        default_prices = {
-                            'HK.00700': 600.0, 'HK.09988': 80.0, 'HK.03690': 120.0,
-                            'HK.01810': 15.0, 'HK.09618': 120.0, 'HK.02318': 40.0,
-                            'HK.00388': 300.0
-                        }
+                        if market_type == 'HK':
+                            default_prices = {
+                                'HK.00700': 600.0, 'HK.09988': 80.0, 'HK.03690': 120.0,
+                                'HK.01810': 15.0, 'HK.09618': 120.0, 'HK.02318': 40.0,
+                                'HK.00388': 300.0
+                            }
+                        else:  # US market
+                            default_prices = {
+                                'US.AAPL': 150.0, 'US.TSLA': 250.0, 'US.NVDA': 400.0,
+                                'US.MSFT': 300.0, 'US.GOOGL': 120.0, 'US.AMZN': 130.0,
+                                'US.META': 280.0, 'US.NFLX': 400.0
+                            }
                         current_price = default_prices.get(stock_code, 100.0)
                         self.logger.info(f"V2 {stock_code}当前股价(使用默认价格): {current_price}")
                 
@@ -598,16 +613,23 @@ class BigOptionsProcessor:
                 price_lower = current_price * (1 - price_range)
                 price_upper = current_price * (1 + price_range)
             
-            # 获取期权到期日
+            # 获取期权到期日 - 支持港股和美股
             try:
                 ret, expiry_data = quote_ctx.get_option_expiration_date(stock_code)
                 if ret != ft.RET_OK or expiry_data.empty:
-                    self.logger.warning(f"V2 {stock_code}没有期权合约或API调用失败")
+                    self.logger.warning(f"V2 {stock_code}({market_type})没有期权合约或API调用失败")
                     return []
                 
-                # 只获取最近1个月内的期权链
+                # 根据市场类型调整时间范围
                 now = datetime.now()
-                one_month_later = now + timedelta(days=30)
+                if market_type == 'US':
+                    # 美股期权通常有更多到期日，可以选择更近的
+                    time_range_days = 45  # 1.5个月
+                else:
+                    # 港股期权
+                    time_range_days = 30  # 1个月
+                
+                time_limit = now + timedelta(days=time_range_days)
                 
                 valid_dates = []
                 for _, row in expiry_data.iterrows():
@@ -621,11 +643,11 @@ class BigOptionsProcessor:
                     if isinstance(expiry, pd.Timestamp):
                         expiry = expiry.to_pydatetime()
                     
-                    if now <= expiry <= one_month_later:
+                    if now <= expiry <= time_limit:
                         valid_dates.append(row)
                 
-                recent_dates = pd.DataFrame(valid_dates) if valid_dates else expiry_data.head(2)
-                self.logger.info(f"V2 {stock_code} 找到 {len(expiry_data)} 个到期日，筛选出 {len(recent_dates)} 个1个月内的到期日")
+                recent_dates = pd.DataFrame(valid_dates) if valid_dates else expiry_data.head(3)
+                self.logger.info(f"V2 {stock_code}({market_type}) 找到 {len(expiry_data)} 个到期日，筛选出 {len(recent_dates)} 个{time_range_days}天内的到期日")
                 
                 for _, row in recent_dates.iterrows():
                     try:
@@ -637,19 +659,32 @@ class BigOptionsProcessor:
                         elif isinstance(expiry_date, datetime):
                             date_str = expiry_date.strftime('%Y-%m-%d')
                         
-                        self.logger.debug(f"V2获取 {stock_code} {date_str} 的期权链")
-                        ret2, option_data = quote_ctx.get_option_chain(
-                            code=stock_code, 
-                            start=date_str, 
-                            end=date_str,
-                            option_type=ft.OptionType.ALL,
-                            option_cond_type=ft.OptionCondType.ALL
-                        )
+                        self.logger.debug(f"V2获取 {stock_code}({market_type}) {date_str} 的期权链")
+                        
+                        # 根据市场类型调整期权链获取参数
+                        if market_type == 'US':
+                            # 美股期权可能需要不同的参数
+                            ret2, option_data = quote_ctx.get_option_chain(
+                                code=stock_code, 
+                                start=date_str, 
+                                end=date_str,
+                                option_type=ft.OptionType.ALL,
+                                option_cond_type=ft.OptionCondType.ALL
+                            )
+                        else:
+                            # 港股期权
+                            ret2, option_data = quote_ctx.get_option_chain(
+                                code=stock_code, 
+                                start=date_str, 
+                                end=date_str,
+                                option_type=ft.OptionType.ALL,
+                                option_cond_type=ft.OptionCondType.ALL
+                            )
                                 
                         if ret2 == ft.RET_OK and not option_data.empty:
-                            self.logger.info(f"V2 API调用成功: {stock_code} {expiry_date}, 获取到 {len(option_data)} 个期权")
+                            self.logger.info(f"V2 API调用成功: {stock_code}({market_type}) {expiry_date}, 获取到 {len(option_data)} 个期权")
                         else:
-                            self.logger.warning(f"V2 API调用返回空数据: {stock_code} {expiry_date}")
+                            self.logger.warning(f"V2 API调用返回空数据: {stock_code}({market_type}) {expiry_date}")
                         
                         time.sleep(0.5)  # 避免API限流
                         
@@ -662,7 +697,7 @@ class BigOptionsProcessor:
                             
                             if not filtered_options.empty:
                                 option_codes.extend(filtered_options['code'].tolist())
-                                self.logger.info(f"V2 {stock_code} {expiry_date}到期的期权中有{len(filtered_options)}个在价格范围内")
+                                self.logger.info(f"V2 {stock_code}({market_type}) {expiry_date}到期的期权中有{len(filtered_options)}个在价格范围内")
                             else:
                                 # 如果没有在范围内的期权，尝试放宽范围
                                 wider_range = price_range * 1.5
@@ -681,11 +716,11 @@ class BigOptionsProcessor:
                                     option_codes.extend(closest_options['code'].tolist())
                                     self.logger.info(f"V2使用更宽范围添加 {len(closest_options)} 个最接近当前价格的期权")
                     except Exception as e:
-                        self.logger.warning(f"V2获取{stock_code}期权链失败: {e}")
+                        self.logger.warning(f"V2获取{stock_code}({market_type})期权链失败: {e}")
                         continue
                 
             except Exception as e:
-                self.logger.error(f"V2获取{stock_code}期权到期日失败: {e}")
+                self.logger.error(f"V2获取{stock_code}({market_type})期权到期日失败: {e}")
                 return []
             
             if option_codes:
@@ -777,62 +812,66 @@ class BigOptionsProcessor:
                     
                     # 从数据库获取该期权的上一条记录成交量进行比较
                     previous_volume = self.db_manager.get_previous_option_volume(option_code, current_volume)
+                    volume_diff = current_volume - previous_volume
                     
-                    # 检查当前数据是否符合大单条件
-                    if (current_volume >= BIG_TRADE_CONFIG['min_volume_threshold'] and 
+                    # 更新当日成交量缓存
+                    self._update_today_volume_cache(option_code, current_volume)
+                    
+                    # 构建期权交易信息（所有期权数据都构建）
+                    trade_info = {
+                        'stock_code': stock_code,
+                        'stock_name': option_info.get('stock_name', ''),
+                        'option_code': option_code,
+                        'timestamp': datetime.now().isoformat(),
+                        'time_full': str(row.get('update_time') or row.get('time') or datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+                        'price': float(row.get('last_price', 0)),
+                        'volume': int(current_volume),
+                        'turnover': float(current_turnover),
+                        'change_rate': float(row.get('change_rate', 0)),
+                        'detected_time': datetime.now().isoformat(),
+                        'data_type': 'v2_current',
+                        'strike_price': option_info.get('strike_price', 0),
+                        'option_type': option_info.get('option_type', '未知'),
+                        'expiry_date': option_info.get('expiry_date', ''),
+                        'stock_price': option_info.get('stock_price', 0),
+                        'price_diff': option_info.get('price_diff', 0),
+                        'price_diff_pct': option_info.get('price_diff_pct', 0),
+                        'volume_diff': volume_diff,
+                        'last_volume': previous_volume
+                    }
+                    
+                    # 获取买卖方向
+                    direction = "Unknown"
+                    direction_text = ""
+                    try:
+                        ret_ticker, ticker_data = quote_ctx.get_rt_ticker(option_code, 1)
+                        if ret_ticker == ft.RET_OK and not ticker_data.empty:
+                            ticker_row = ticker_data.iloc[0]
+                            direction = ticker_row.get('ticker_direction', 'Unknown')
+                            
+                            if direction == "BUY":
+                                direction_text = "买入"
+                            elif direction == "SELL":
+                                direction_text = "卖出"
+                            elif direction == "NEUTRAL":
+                                direction_text = "中性"
+                    except Exception as ticker_e:
+                        self.logger.debug(f"V2获取{option_code}逐笔成交方向失败: {ticker_e}")
+                    
+                    trade_info['direction'] = direction
+                    
+                    # 🔥 关键修改：所有期权数据都保存到数据库
+                    self._save_to_database(trade_info)
+                    self.logger.debug(f"V2期权数据已保存: {option_code} (成交量:{current_volume}, 成交额:{current_turnover:.0f})")
+                    
+                    # 🔥 关键修改：检查是否满足大单条件，满足条件的才加入返回列表（用于通知）
+                    is_big_trade = (
+                        current_volume >= BIG_TRADE_CONFIG['min_volume_threshold'] and 
                         current_turnover >= BIG_TRADE_CONFIG['min_turnover_threshold'] and
-                        current_volume != previous_volume):
-                        
-                        volume_diff = current_volume - previous_volume
-                        
-                        # 更新当日成交量缓存
-                        self._update_today_volume_cache(option_code, current_volume)
-                        
-                        trade_info = {
-                            'stock_code': stock_code,
-                            'stock_name': option_info.get('stock_name', ''),
-                            'option_code': option_code,
-                            'timestamp': datetime.now().isoformat(),
-                            'time_full': str(row.get('update_time') or row.get('time') or datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
-                            'price': float(row.get('last_price', 0)),
-                            'volume': int(current_volume),
-                            'turnover': float(current_turnover),
-                            'change_rate': float(row.get('change_rate', 0)),
-                            'detected_time': datetime.now().isoformat(),
-                            'data_type': 'v2_current',
-                            'strike_price': option_info.get('strike_price', 0),
-                            'option_type': option_info.get('option_type', '未知'),
-                            'expiry_date': option_info.get('expiry_date', ''),
-                            'stock_price': option_info.get('stock_price', 0),
-                            'price_diff': option_info.get('price_diff', 0),
-                            'price_diff_pct': option_info.get('price_diff_pct', 0),
-                            'volume_diff': volume_diff,
-                            'last_volume': previous_volume
-                        }
-                        
-                        # 获取买卖方向
-                        direction = "Unknown"
-                        direction_text = ""
-                        try:
-                            ret_ticker, ticker_data = quote_ctx.get_rt_ticker(option_code, 1)
-                            if ret_ticker == ft.RET_OK and not ticker_data.empty:
-                                ticker_row = ticker_data.iloc[0]
-                                direction = ticker_row.get('ticker_direction', 'Unknown')
-                                
-                                if direction == "BUY":
-                                    direction_text = "买入"
-                                elif direction == "SELL":
-                                    direction_text = "卖出"
-                                elif direction == "NEUTRAL":
-                                    direction_text = "中性"
-                        except Exception as ticker_e:
-                            self.logger.error(f"V2获取{option_code}逐笔成交方向失败: {ticker_e}")
-                        
-                        trade_info['direction'] = direction
-                        
-                        # 保存到SQL数据库
-                        self._save_to_database(trade_info)
-                        
+                        current_volume != previous_volume
+                    )
+                    
+                    if is_big_trade:
                         big_trades.append(trade_info)
                         
                         direction_display = f", 方向: {direction_text}" if direction_text else ""

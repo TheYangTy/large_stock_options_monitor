@@ -13,16 +13,20 @@ import sys
 
 # 添加V2系统路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import DATABASE_CONFIG
+from config import get_database_config
 
 
 class V2DatabaseManager:
     """V2系统数据库管理器"""
     
-    def __init__(self):
-        self.logger = logging.getLogger('V2OptionMonitor.DatabaseManager')
-        self.db_path = DATABASE_CONFIG['db_path']
-        self.batch_size = DATABASE_CONFIG.get('batch_size', 1000)
+    def __init__(self, market: str = 'HK'):
+        self.market = market
+        self.logger = logging.getLogger(f'V2OptionMonitor.DatabaseManager.{market}')
+        
+        # 根据市场获取数据库配置
+        db_config = get_database_config(market)
+        self.db_path = db_config['db_path']
+        self.batch_size = db_config.get('batch_size', 1000)
         
         # 确保数据库目录存在
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
@@ -100,7 +104,7 @@ class V2DatabaseManager:
                 ''')
                 
                 conn.commit()
-                self.logger.info("V2数据库初始化完成")
+                self.logger.info(f"V2数据库初始化完成 ({self.market}市场)")
                 
         except Exception as e:
             self.logger.error(f"V2数据库初始化失败: {e}")
@@ -576,11 +580,11 @@ class V2DatabaseManager:
 
 
 # 全局数据库管理器实例
-_db_manager = None
+_db_managers = {}
 
-def get_database_manager() -> V2DatabaseManager:
+def get_database_manager(market: str = 'HK') -> V2DatabaseManager:
     """获取数据库管理器单例"""
-    global _db_manager
-    if _db_manager is None:
-        _db_manager = V2DatabaseManager()
-    return _db_manager
+    global _db_managers
+    if market not in _db_managers:
+        _db_managers[market] = V2DatabaseManager(market)
+    return _db_managers[market]

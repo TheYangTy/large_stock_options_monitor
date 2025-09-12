@@ -13,19 +13,20 @@ import sys
 
 # 添加V2系统路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import SYSTEM_CONFIG, DATABASE_CONFIG
-from .database_manager import V2DatabaseManager
+from config import SYSTEM_CONFIG, get_database_config
+from .database_manager import get_database_manager
 
 
 class V2DataHandler:
     """V2系统数据处理器"""
     
-    def __init__(self):
-        self.logger = logging.getLogger('V2OptionMonitor.DataHandler')
+    def __init__(self, market: str = 'HK'):
+        self.market = market
+        self.logger = logging.getLogger(f'V2OptionMonitor.DataHandler.{market}')
         self.cache_dir = SYSTEM_CONFIG['cache_dir']
         self.stock_info_file = SYSTEM_CONFIG['stock_info_cache']
         self.price_cache_file = SYSTEM_CONFIG['price_cache']
-        self.db_manager = V2DatabaseManager()
+        self.db_manager = get_database_manager(market)
         
         # 确保缓存目录存在（用于临时文件和导出）
         os.makedirs(self.cache_dir, exist_ok=True)

@@ -53,7 +53,7 @@ class BigOptionsProcessor:
     
     def __init__(self):
         self.logger = logging.getLogger('V2OptionMonitor.BigOptionsProcessor')
-        self.json_file = os.path.join(SYSTEM_CONFIG['cache_dir'], 'big_options_v2.json')
+        # 数据现在统一存储在数据库中，不再使用JSON文件
         self.stock_price_cache = {}  # 缓存股价信息
         self.price_cache_time = {}   # 缓存时间
         self.last_option_volumes = {}  # 缓存上一次的期权交易量
@@ -61,8 +61,8 @@ class BigOptionsProcessor:
         self.today_option_volumes = {}  # 当日期权成交量缓存
         self.today_volumes_loaded = False  # 是否已加载当日数据
         
-        # 确保缓存目录存在
-        os.makedirs(os.path.dirname(self.json_file), exist_ok=True)
+        # 数据现在统一存储在数据库中，不再需要创建JSON文件目录
+        # os.makedirs(os.path.dirname(self.json_file), exist_ok=True)
     
     def _load_today_option_volumes(self) -> Dict[str, int]:
         """从SQL数据库加载当日期权成交量"""
@@ -834,8 +834,9 @@ class BigOptionsProcessor:
                 else:
                     return str(obj)
             
-            with open(self.json_file, 'w', encoding='utf-8') as f:
-                json.dump(summary, f, ensure_ascii=False, indent=2, default=json_serializer)
+            # 数据现在统一存储在数据库中，不再保存到JSON文件
+            # with open(self.json_file, 'w', encoding='utf-8') as f:
+            #     json.dump(summary, f, ensure_ascii=False, indent=2, default=json_serializer)
             
             self.logger.info(f"V2大单期权汇总已保存: {len(big_options)}笔交易")
             
@@ -983,8 +984,10 @@ class BigOptionsProcessor:
     def load_current_summary(self) -> Optional[Dict[str, Any]]:
         """V2系统加载当前的汇总数据"""
         try:
-            with open(self.json_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
+            # 数据现在从数据库读取，不再从JSON文件读取
+            # with open(self.json_file, 'r', encoding='utf-8') as f:
+            #     return json.load(f)
+            return {}  # 返回空字典，因为数据现在存储在数据库中
         except FileNotFoundError:
             return None
         except Exception as e:

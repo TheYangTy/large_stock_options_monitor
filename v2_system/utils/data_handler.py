@@ -14,6 +14,7 @@ import sys
 # 添加V2系统路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import SYSTEM_CONFIG, DATABASE_CONFIG
+from .database_manager import V2DatabaseManager
 
 
 class V2DataHandler:
@@ -24,8 +25,9 @@ class V2DataHandler:
         self.cache_dir = SYSTEM_CONFIG['cache_dir']
         self.stock_info_file = SYSTEM_CONFIG['stock_info_cache']
         self.price_cache_file = SYSTEM_CONFIG['price_cache']
+        self.db_manager = V2DatabaseManager()
         
-        # 确保缓存目录存在
+        # 确保缓存目录存在（用于临时文件和导出）
         os.makedirs(self.cache_dir, exist_ok=True)
         os.makedirs(os.path.dirname(self.stock_info_file), exist_ok=True)
     
@@ -108,91 +110,68 @@ class V2DataHandler:
             return {}
     
     def save_option_data(self, option_data: List[Dict[str, Any]]) -> bool:
-        """保存期权数据"""
+        """保存期权数据到数据库"""
         try:
             if not option_data:
                 return True
             
-            # 按日期分组保存
-            today = datetime.now().strftime('%Y-%m-%d')
-            option_file = os.path.join(self.cache_dir, f'options_{today}.json')
+            success_count = 0
+            for option in option_data:
+                if self.db_manager.save_option_trade(option):
+                    success_count += 1
             
-            # 如果文件已存在，追加数据
-            existing_data = []
-            if os.path.exists(option_file):
-                try:
-                    with open(option_file, 'r', encoding='utf-8') as f:
-                        existing_data = json.load(f)
-                except:
-                    existing_data = []
-            
-            # 合并数据
-            all_data = existing_data + option_data
-            
-            # 去重（基于期权代码和时间戳）
-            unique_data = {}
-            for item in all_data:
-                key = f"{item.get('option_code')}_{item.get('timestamp')}"
-                unique_data[key] = item
-            
-            final_data = list(unique_data.values())
-            
-            with open(option_file, 'w', encoding='utf-8') as f:
-                json.dump(final_data, f, ensure_ascii=False, indent=2)
-            
-            self.logger.info(f"V2期权数据已保存: {len(final_data)}条记录")
-            return True
+            self.logger.info(f"V2期权数据已保存到数据库: {success_count}/{len(option_data)}条记录")
+            return success_count > 0
             
         except Exception as e:
-            self.logger.error(f"V2保存期权数据失败: {e}")
+            self.logger.error(f"V2保存期权数据到数据库失败: {e}")
             return False
     
-    def load_recent_option_data(self, days: int = 7) -> List[Dict[str, Any]]:
-        """加载最近几天的期权数据"""
+    def load_recent_option_data(self, days: int = 7, hours: int = None) -> List[Dict[str, Any]]:
+        """从数据库加载最近的期权数据"""
         try:
-            all_data = []
+            if hours:
+                # 按小时加载
+                cutoff_time = datetime.now() - timedelta(hours=hours)
+                all_data = self.db_manager.get_recent_option_trades(hours=hours)
+            else:
+                # 按天加载
+                cutoff_time = datetime.now() - timedelta(days=days)
+                all_data = self.db_manager.get_recent_option_trades(days=days)
             
-            for i in range(days):
-                date = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
-                option_file = os.path.join(self.cache_dir, f'options_{date}.json')
-                
-                if os.path.exists(option_file):
-                    try:
-                        with open(option_file, 'r', encoding='utf-8') as f:
-                            daily_data = json.load(f)
-                            all_data.extend(daily_data)
-                    except Exception as e:
-                        self.logger.warning(f"V2加载{date}期权数据失败: {e}")
-            
-            self.logger.info(f"V2加载最近{days}天期权数据: {len(all_data)}条记录")
+            self.logger.info(f"V2从数据库加载最近期权数据: {len(all_data)}条记录")
             return all_data
             
         except Exception as e:
-            self.logger.error(f"V2加载最近期权数据失败: {e}")
+            self.logger.error(f"V2从数据库加载最近期权数据失败: {e}")
             return []
     
     def cleanup_old_data(self, keep_days: int = 30) -> bool:
-        """清理旧数据"""
+        """清理旧数据（数据库和文件）"""
         try:
-            cutoff_date = datetime.now() - timedelta(days=keep_days)
-            cleaned_count = 0
+            # 清理数据库中的旧数据
+            db_cleaned = self.db_manager.cleanup_old_data(keep_days)
             
-            # 清理期权数据文件
-            for filename in os.listdir(self.cache_dir):
-                if filename.startswith('options_') and filename.endswith('.json'):
-                    try:
-                        date_str = filename[8:18]  # 提取日期部分
-                        file_date = datetime.strptime(date_str, '%Y-%m-%d')
-                        
-                        if file_date < cutoff_date:
-                            file_path = os.path.join(self.cache_dir, filename)
-                            os.remove(file_path)
-                            cleaned_count += 1
-                            self.logger.info(f"V2删除旧数据文件: {filename}")
-                    except Exception as e:
-                        self.logger.warning(f"V2处理文件{filename}失败: {e}")
+            # 清理旧的JSON文件（如果还有的话）
+            file_cleaned_count = 0
+            if os.path.exists(self.cache_dir):
+                cutoff_date = datetime.now() - timedelta(days=keep_days)
+                
+                for filename in os.listdir(self.cache_dir):
+                    if filename.startswith('options_') and filename.endswith('.json'):
+                        try:
+                            date_str = filename[8:18]  # 提取日期部分
+                            file_date = datetime.strptime(date_str, '%Y-%m-%d')
+                            
+                            if file_date < cutoff_date:
+                                file_path = os.path.join(self.cache_dir, filename)
+                                os.remove(file_path)
+                                file_cleaned_count += 1
+                                self.logger.info(f"V2删除旧JSON文件: {filename}")
+                        except Exception as e:
+                            self.logger.warning(f"V2处理文件{filename}失败: {e}")
             
-            self.logger.info(f"V2数据清理完成，删除{cleaned_count}个文件")
+            self.logger.info(f"V2数据清理完成，数据库清理: {db_cleaned}, 文件清理: {file_cleaned_count}个")
             return True
             
         except Exception as e:

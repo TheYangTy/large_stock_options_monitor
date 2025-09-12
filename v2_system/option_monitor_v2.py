@@ -55,35 +55,131 @@ class V2OptionMonitor:
         self.quote_ctx = None
         self.is_running = False
         self.monitor_thread = None
+        self.connection_thread = None
+        self.polling_thread = None
         self.subscribed_options = set()  # 已订阅的期权代码
         self.stock_price_cache = {}  # 股价缓存
         self.price_update_time = {}  # 股价更新时间
         self.option_chain_cache = {}  # 期权链缓存
         self.last_scan_time = None
         self.scan_count = 0
+        self.previous_options = []  # 上次扫描的期权数据
+        
+        # 连接状态管理
+        self.connection_lock = threading.Lock()
+        self.is_connected = False
+        self.connection_retry_count = 0
+        self.max_retry_count = 5
         
         self.logger.info("V2系统期权监控器初始化完成")
     
-    def connect_futu(self) -> bool:
-        """连接富途OpenD"""
+    def _maintain_connection(self):
+        """后台线程维持与OpenD的持久连接"""
+        self.logger.info("V2系统连接维护线程启动")
+        
+        while self.is_running:
+            try:
+                with self.connection_lock:
+                    if not self.is_connected or not self._check_connection():
+                        self.logger.info("V2系统检测到连接断开，尝试重新连接...")
+                        if self._connect_futu_internal():
+                            self.is_connected = True
+                            self.connection_retry_count = 0
+                            self.logger.info("V2系统连接恢复成功")
+                        else:
+                            self.is_connected = False
+                            self.connection_retry_count += 1
+                            self.logger.warning(f"V2系统连接失败，重试次数: {self.connection_retry_count}")
+                            
+                            if self.connection_retry_count >= self.max_retry_count:
+                                self.logger.error("V2系统连接重试次数超限，停止监控")
+                                self.is_running = False
+                                break
+                
+                # 每30秒检查一次连接状态
+                time.sleep(30)
+                
+            except Exception as e:
+                self.logger.error(f"V2系统连接维护线程异常: {e}")
+                time.sleep(30)
+        
+        self.logger.info("V2系统连接维护线程退出")
+    
+    def _connect_futu_internal(self) -> bool:
+        """内部连接方法（不加锁）"""
         try:
+            # 如果已有连接，先测试是否可用
+            if self.quote_ctx:
+                try:
+                    ret, data = self.quote_ctx.get_market_snapshot(['HK.00700'])
+                    if ret == ft.RET_OK:
+                        self.logger.debug("V2系统现有连接仍然可用")
+                        return True
+                    else:
+                        self.logger.info("V2系统现有连接已失效，需要重新连接")
+                        self.quote_ctx.close()
+                except:
+                    self.logger.info("V2系统现有连接测试失败，需要重新连接")
+                    try:
+                        self.quote_ctx.close()
+                    except:
+                        pass
+            
+            # 建立新连接
             self.quote_ctx = ft.OpenQuoteContext(
                 host=FUTU_CONFIG['host'], 
                 port=FUTU_CONFIG['port']
             )
             
-            # 测试连接
+            # 测试新连接
             ret, data = self.quote_ctx.get_market_snapshot(['HK.00700'])
             if ret == ft.RET_OK:
                 self.logger.info(f"V2系统富途OpenD连接成功: {FUTU_CONFIG['host']}:{FUTU_CONFIG['port']}")
                 return True
             else:
-                self.logger.error(f"V2系统富途OpenD连接测试失败: {ret}")
+                self.logger.warning(f"V2系统富途OpenD连接测试失败: {ret}")
                 return False
                 
         except Exception as e:
-            self.logger.error(f"V2系统连接富途OpenD失败: {e}")
+            self.logger.warning(f"V2系统连接富途OpenD失败: {e}")
             return False
+    
+    def connect_futu(self, max_retries: int = 3, retry_delay: int = 5) -> bool:
+        """连接富途OpenD（带重试机制）- 兼容性方法"""
+        with self.connection_lock:
+            if self._connect_futu_internal():
+                self.is_connected = True
+                return True
+            else:
+                self.is_connected = False
+                return False
+    
+    def _polling_loop(self):
+        """定时轮询线程 - 每2分钟轮询一次数据"""
+        self.logger.info("V2系统数据轮询线程启动")
+        
+        while self.is_running:
+            try:
+                # 检查连接状态
+                with self.connection_lock:
+                    if self.is_connected and self._check_connection():
+                        # 执行数据扫描
+                        self.scan_big_options()
+                    else:
+                        self.logger.warning("V2系统连接不可用，跳过本次轮询")
+                
+                # 等待2分钟
+                for _ in range(120):  # 120秒 = 2分钟
+                    if not self.is_running:
+                        break
+                    time.sleep(1)
+                
+            except Exception as e:
+                self.logger.error(f"V2系统轮询线程异常: {e}")
+                self.logger.error(traceback.format_exc())
+                time.sleep(30)  # 异常后等待30秒再继续
+        
+        self.logger.info("V2系统数据轮询线程退出")
     
     def disconnect_futu(self):
         """断开富途连接"""
@@ -131,6 +227,11 @@ class V2OptionMonitor:
             self.scan_count += 1
             self.logger.info(f"V2系统开始第{self.scan_count}次大单期权扫描...")
             
+            # 确保连接可用
+            if not self.ensure_connection():
+                self.logger.error("V2系统富途连接不可用，跳过本次扫描")
+                return []
+            
             # 获取大单期权
             big_options = self.big_options_processor.get_recent_big_options(
                 self.quote_ctx, 
@@ -141,13 +242,19 @@ class V2OptionMonitor:
             if big_options:
                 self.logger.info(f"V2系统发现 {len(big_options)} 笔大单期权")
                 
-                # 保存数据
-                self.data_handler.save_option_data(big_options)
-                self.big_options_processor.save_big_options_summary(big_options)
+                # 与历史数据比较，计算增量
+                big_options_with_diff = self.compare_with_previous_options(big_options)
                 
-                # 发送按股票汇总的通知
-                if big_options:
-                    self.notifier.send_v1_style_summary_report(big_options)
+                # 保存数据
+                self.data_handler.save_option_data(big_options_with_diff)
+                self.big_options_processor.save_big_options_summary(big_options_with_diff)
+                
+                # 发送一次汇总通知（包含所有有变化的股票）
+                if big_options_with_diff:
+                    self._send_consolidated_report(big_options_with_diff)
+                
+                # 更新历史数据
+                self.previous_options = big_options_with_diff
                 
             else:
                 self.logger.info("V2系统本次扫描未发现大单期权")
@@ -158,32 +265,17 @@ class V2OptionMonitor:
         except Exception as e:
             self.logger.error(f"V2系统扫描大单期权失败: {e}")
             self.logger.error(traceback.format_exc())
+            
+            # 如果是连接相关错误，标记连接为无效
+            if "连接" in str(e) or "connection" in str(e).lower():
+                self.quote_ctx = None
+            
             return []
     
     def monitor_loop(self):
-        """监控主循环"""
-        self.logger.info("V2系统监控循环开始")
-        
-        while self.is_running:
-            try:
-                # 检查是否在交易时间,true为测试用
-                if True or self.is_trading_time():
-                    # 扫描大单期权
-                    big_options = self.scan_big_options()
-                    
-                    # 等待下次扫描
-                    time.sleep(SYSTEM_CONFIG['monitor_interval'])
-                else:
-                    self.logger.info("V2系统非交易时间，暂停监控")
-                    time.sleep(60)  # 非交易时间每分钟检查一次
-                    
-            except KeyboardInterrupt:
-                self.logger.info("V2系统收到中断信号，停止监控")
-                break
-            except Exception as e:
-                self.logger.error(f"V2系统监控循环异常: {e}")
-                self.logger.error(traceback.format_exc())
-                time.sleep(10)  # 异常后等待10秒再继续
+        """监控主循环 - 已废弃，使用轮询线程架构"""
+        self.logger.warning("V2系统monitor_loop方法已废弃，请使用_polling_loop轮询线程")
+        return
     
     def is_trading_time(self) -> bool:
         """检查是否在交易时间"""
@@ -227,16 +319,34 @@ class V2OptionMonitor:
                 self.logger.error("V2系统无法连接富途OpenD，监控启动失败")
                 return
             
+            # 加载历史数据作为比较基准
+            self.load_previous_options()
+            
             self.is_running = True
             
-            # 启动监控线程
-            self.monitor_thread = threading.Thread(target=self.monitor_loop, daemon=True)
-            self.monitor_thread.start()
+            # 启动后台线程
+            # 启动连接维护线程
+            self.connection_thread = threading.Thread(target=self._maintain_connection, daemon=True)
+            self.connection_thread.start()
             
-            self.logger.info("V2系统期权监控已启动")
+            # 启动数据轮询线程（替代旧的monitor_thread）
+            self.polling_thread = threading.Thread(target=self._polling_loop, daemon=True)
+            self.polling_thread.start()
             
-            # 发送启动通知
+            # 不再启动旧的monitor_thread，避免重复扫描
+            self.monitor_thread = None
+            
+            self.logger.info("V2系统期权监控已启动（持久连接 + 2分钟轮询）")
+            
+            # 发送启动通知 - 加载历史数据，但不立即扫描（避免与轮询线程重复）
+            self.logger.info("V2系统启动，加载历史数据")
+            
+            # 先加载历史数据
+            self.load_previous_options()
+            
+            # 发送简单启动通知，实际扫描由轮询线程负责
             self.notifier.send_wework_notification("V2系统期权大单监控已启动")
+            self.logger.info("V2系统启动通知已发送，轮询线程将开始监控")
             self.mac_notifier.send_notification("V2系统启动", "期权大单监控已开始运行")
             
         except Exception as e:
@@ -252,7 +362,13 @@ class V2OptionMonitor:
             
             self.is_running = False
             
-            # 等待监控线程结束
+            # 等待所有线程结束
+            if self.connection_thread and self.connection_thread.is_alive():
+                self.connection_thread.join(timeout=5)
+            
+            if self.polling_thread and self.polling_thread.is_alive():
+                self.polling_thread.join(timeout=5)
+            
             if self.monitor_thread and self.monitor_thread.is_alive():
                 self.monitor_thread.join(timeout=5)
             
@@ -279,13 +395,168 @@ class V2OptionMonitor:
             'system_version': 'V2'
         }
     
+    def _send_consolidated_report(self, big_options_with_diff: List[Dict]):
+        """发送合并的汇总报告 - 一次扫描只发送一次通知"""
+        try:
+            if not big_options_with_diff:
+                return
+            
+            # 按股票分组统计
+            stock_summary = {}
+            total_trades = len(big_options_with_diff)
+            total_amount = 0
+            
+            for option in big_options_with_diff:
+                stock_code = option.get('stock_code', '')
+                stock_name = option.get('stock_name', '')
+                amount = option.get('amount', 0)
+                
+                if stock_code not in stock_summary:
+                    stock_summary[stock_code] = {
+                        'name': stock_name,
+                        'trades': 0,
+                        'amount': 0,
+                        'options': []
+                    }
+                
+                stock_summary[stock_code]['trades'] += 1
+                stock_summary[stock_code]['amount'] += amount
+                stock_summary[stock_code]['options'].append(option)
+                total_amount += amount
+            
+            # 生成汇总报告
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            report_lines = [
+                f"[V2系统] 📊 期权监控汇总报告",
+                f"⏰ 时间: {current_time}",
+                f"📈 总交易: {total_trades} 笔",
+                f"💰 总金额: {total_amount:,.0f} 港币",
+                "",
+                "📋 大单统计:"
+            ]
+            
+            # 按金额排序股票
+            sorted_stocks = sorted(stock_summary.items(), 
+                                 key=lambda x: x[1]['amount'], reverse=True)
+            
+            for stock_code, info in sorted_stocks:
+                report_lines.append(f"• {info['name']} ({stock_code}): {info['trades']}笔, {info['amount']:,.0f}港币")
+                
+                # 显示前3个最大的期权
+                top_options = sorted(info['options'], 
+                                   key=lambda x: x.get('amount', 0), reverse=True)[:3]
+                
+                for i, opt in enumerate(top_options, 1):
+                    option_code = opt.get('option_code', '')
+                    option_type = "Call" if "C" in option_code else "Put"
+                    price = opt.get('price', 0)
+                    volume = opt.get('volume', 0)
+                    volume_diff = opt.get('volume_diff', 0)
+                    amount = opt.get('amount', 0)
+                    
+                    report_lines.append(
+                        f"  {i}. {option_code}: {option_type}, "
+                        f"{price:.3f}×{volume}张, +{volume_diff}张, "
+                        f"{amount/10000:.1f}万"
+                    )
+            
+            # 发送通知
+            report_text = "\n".join(report_lines)
+            self.notifier.send_wework_notification(report_text)
+            self.logger.info(f"V2系统发送汇总报告: {total_trades}笔交易, {len(stock_summary)}只股票")
+            
+        except Exception as e:
+            self.logger.error(f"V2系统发送汇总报告失败: {e}")
+    
+    def load_previous_options(self):
+        """从数据库加载历史期权数据作为比较基准"""
+        try:
+            # 直接从数据库加载最近2小时的期权数据
+            self.previous_options = self.data_handler.load_recent_option_data(hours=2)
+            
+            self.logger.info(f"V2系统从数据库加载历史期权数据: {len(self.previous_options)} 条记录")
+            
+        except Exception as e:
+            self.logger.error(f"V2系统从数据库加载历史期权数据失败: {e}")
+            self.previous_options = []
+    
+    def compare_with_previous_options(self, current_options: List[Dict]) -> List[Dict]:
+        """与历史期权数据比较，计算增量"""
+        try:
+            # 构建历史数据索引
+            previous_index = {}
+            for opt in self.previous_options:
+                key = opt.get('option_code', '')
+                if key:
+                    previous_index[key] = opt
+            
+            # 计算当前数据的增量
+            options_with_diff = []
+            for current_opt in current_options:
+                option_code = current_opt.get('option_code', '')
+                current_volume = current_opt.get('volume', 0)
+                
+                # 查找历史数据
+                previous_opt = previous_index.get(option_code)
+                if previous_opt:
+                    previous_volume = previous_opt.get('volume', 0)
+                    volume_diff = current_volume - previous_volume
+                else:
+                    # 新期权
+                    previous_volume = 0
+                    volume_diff = current_volume
+                
+                # 添加增量信息
+                opt_with_diff = current_opt.copy()
+                opt_with_diff['last_volume'] = previous_volume
+                opt_with_diff['volume_diff'] = volume_diff
+                
+                # 只保留有变化的期权（新增或成交量增加）
+                if volume_diff > 0:
+                    options_with_diff.append(opt_with_diff)
+            
+            self.logger.info(f"V2系统期权增量比较: {len(current_options)} -> {len(options_with_diff)} (有变化)")
+            return options_with_diff
+            
+        except Exception as e:
+            self.logger.error(f"V2系统期权增量比较失败: {e}")
+            # 如果比较失败，返回原数据但标记为无变化
+            return []
+    
+    def _check_connection(self) -> bool:
+        """检查富途连接状态"""
+        try:
+            if not self.quote_ctx:
+                return False
+            
+            # 尝试获取市场快照来测试连接
+            ret, data = self.quote_ctx.get_market_snapshot(['HK.00700'])
+            return ret == ft.RET_OK
+            
+        except Exception as e:
+            self.logger.warning(f"V2系统连接检查失败: {e}")
+            return False
+    
+    def ensure_connection(self) -> bool:
+        """确保富途连接可用"""
+        if self._check_connection():
+            return True
+        
+        self.logger.info("V2系统连接不可用，尝试重新连接...")
+        return self.connect_futu()
+    
     def manual_scan(self) -> List[Dict]:
         """手动扫描一次"""
         self.logger.info("V2系统执行手动扫描...")
-        if not self.quote_ctx:
-            if not self.connect_futu():
-                self.logger.error("V2系统无法连接富途OpenD")
-                return []
+        
+        # 确保连接可用
+        if not self.ensure_connection():
+            self.logger.error("V2系统无法连接富途OpenD")
+            return []
+        
+        # 手动扫描时也加载历史数据
+        if not self.previous_options:
+            self.load_previous_options()
         
         return self.scan_big_options()
 

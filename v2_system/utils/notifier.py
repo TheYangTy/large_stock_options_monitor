@@ -16,6 +16,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import NOTIFICATION
 from .mac_notifier import MacNotifier
+from .database_manager import V2DatabaseManager
 
 
 class V2Notifier:
@@ -26,6 +27,7 @@ class V2Notifier:
         self.mac_notifier = MacNotifier()
         self.notification_history = {}  # 通知历史记录
         self.last_summary_time = None
+        self.db_manager = V2DatabaseManager()
         
     def send_wework_notification(self, message: str, mentioned_list: List[str] = None) -> bool:
         """发送企业微信通知"""
@@ -375,3 +377,141 @@ class V2Notifier:
         
         self.notification_history[option_code] = current_time
         return True
+    
+    def send_v1_style_summary_report(self, big_options: List[Dict[str, Any]]) -> bool:
+        """发送V1风格的期权监控汇总报告"""
+        if not big_options:
+            return False
+        
+        try:
+            # 过滤出有变化的期权（volume_diff > 0）
+            changed_options = [opt for opt in big_options if opt.get('volume_diff', 0) > 0]
+            
+            if not changed_options:
+                self.logger.info("V2没有期权成交量变化，跳过汇总报告")
+                return False
+            
+            current_time = datetime.now()
+            
+            # 计算总体统计
+            total_trades = len(big_options)
+            new_trades = len(changed_options)
+            qualified_trades = len([opt for opt in changed_options if opt.get('turnover', 0) >= 1000000])  # 100万港币以上
+            
+            total_amount = sum(opt.get('turnover', 0) for opt in big_options)
+            new_amount = sum(opt.get('turnover', 0) for opt in changed_options)
+            qualified_amount = sum(opt.get('turnover', 0) for opt in changed_options if opt.get('turnover', 0) >= 1000000)
+            
+            # 按股票分组统计
+            stock_groups = {}
+            for option in changed_options:
+                stock_code = option.get('stock_code', 'Unknown')
+                stock_name = option.get('stock_name', stock_code)
+                
+                # 尝试从数据库获取股票信息
+                stock_info = self.db_manager.get_stock_info(stock_code)
+                if stock_info:
+                    stock_name = stock_info.get('stock_name', stock_name)
+                    current_price = stock_info.get('current_price')
+                else:
+                    current_price = None
+                
+                if stock_code not in stock_groups:
+                    stock_groups[stock_code] = {
+                        'name': stock_name,
+                        'current_price': current_price,
+                        'count': 0,
+                        'turnover': 0,
+                        'options': []
+                    }
+                
+                stock_groups[stock_code]['count'] += 1
+                stock_groups[stock_code]['turnover'] += option.get('turnover', 0)
+                stock_groups[stock_code]['options'].append(option)
+            
+            # 构建汇总报告
+            message_parts = [
+                "📊 期权监控汇总报告",
+                f"⏰ 时间: {current_time.strftime('%Y-%m-%d %H:%M:%S')}",
+                f"📈 总交易: {total_trades} 笔 (新增: {new_trades} 笔，符合通知条件: {qualified_trades} 笔)",
+                f"💰 总金额: {total_amount:,.0f} 港币 (新增: {new_amount:,.0f} 港币，符合条件: {qualified_amount:,.0f} 港币)",
+                "",
+                "📋 新增大单统计:"
+            ]
+            
+            # 按成交额排序股票
+            sorted_stocks = sorted(stock_groups.items(), 
+                                 key=lambda x: x[1]['turnover'], 
+                                 reverse=True)
+            
+            for stock_code, group_data in sorted_stocks:
+                stock_name = group_data['name']
+                current_price = group_data['current_price']
+                count = group_data['count']
+                turnover = group_data['turnover']
+                options = group_data['options']
+                
+                # 股票标题行
+                if current_price:
+                    stock_title = f"• {stock_name} ({stock_code}): {count}笔, {turnover:,.0f}港币 (股价: {current_price:.2f})"
+                else:
+                    stock_title = f"• {stock_name} ({stock_code}): {count}笔, {turnover:,.0f}港币"
+                
+                message_parts.append(stock_title)
+                
+                # 按成交额排序期权，取前3个
+                top_options = sorted(options, key=lambda x: x.get('turnover', 0), reverse=True)[:3]
+                
+                for i, option in enumerate(top_options, 1):
+                    option_code = option.get('option_code', '')
+                    option_type = option.get('option_type', '')
+                    strike_price = option.get('strike_price', 0)
+                    price = option.get('price', 0)
+                    volume = option.get('volume', 0)
+                    volume_diff = option.get('volume_diff', 0)
+                    turnover = option.get('turnover', 0)
+                    
+                    # 构建期权详情行
+                    option_detail = (
+                        f"  {i}. {option_code}: {option_type}, "
+                        f"{price:.3f}×{volume:,}张, +{volume_diff:,}张, "
+                        f"{turnover/10000:.1f}万"
+                    )
+                    message_parts.append(option_detail)
+            
+            message = "\n".join(message_parts)
+            
+            # 发送通知
+            success = False
+            
+            # 发送企微通知
+            if self.send_wework_notification(message):
+                success = True
+            
+            # 发送Mac通知
+            mac_title = "📊 V2期权监控汇总报告"
+            mac_message = f"{new_trades}笔新增交易\n总额: {new_amount/10000:.1f}万港币"
+            if self.send_mac_notification(mac_title, mac_message):
+                success = True
+            
+            # 控制台输出
+            if NOTIFICATION.get('enable_console', True):
+                print(f"\n{message}")
+                success = True
+            
+            if success:
+                self.last_summary_time = current_time
+            
+            return success
+            
+        except Exception as e:
+            self.logger.error(f"V2发送V1风格汇总报告失败: {e}")
+            return False
+    
+    def update_stock_info_cache(self, stock_code: str, stock_name: str = None, current_price: float = None) -> bool:
+        """更新股票信息缓存到数据库"""
+        try:
+            return self.db_manager.save_stock_info(stock_code, stock_name, current_price)
+        except Exception as e:
+            self.logger.error(f"V2更新股票信息缓存失败 {stock_code}: {e}")
+            return False

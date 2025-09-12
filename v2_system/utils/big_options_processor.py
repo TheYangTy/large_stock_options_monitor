@@ -65,70 +65,36 @@ class BigOptionsProcessor:
         os.makedirs(os.path.dirname(self.json_file), exist_ok=True)
     
     def _load_today_option_volumes(self) -> Dict[str, int]:
-        """从数据库/文件加载当日期权成交量"""
+        """从SQL数据库加载当日期权成交量"""
         if self.today_volumes_loaded:
             return self.today_option_volumes
         
         try:
-            from .data_handler import V2DataHandler
-            data_handler = V2DataHandler()
+            from .database_manager import get_database_manager
+            db_manager = get_database_manager()
             
-            # 加载当日期权数据
-            today = datetime.now().strftime('%Y-%m-%d')
-            today_data = []
-            
-            # 尝试加载当日数据文件
-            cache_dir = SYSTEM_CONFIG['cache_dir']
-            today_file = os.path.join(cache_dir, f'options_{today}.json')
-            
-            if os.path.exists(today_file):
-                try:
-                    with open(today_file, 'r', encoding='utf-8') as f:
-                        today_data = json.load(f)
-                    self.logger.info(f"V2加载当日期权数据: {len(today_data)}条记录")
-                except Exception as e:
-                    self.logger.warning(f"V2加载当日期权数据失败: {e}")
-            
-            # 构建期权代码到最新成交量的映射
-            option_volumes = {}
-            for record in today_data:
-                option_code = record.get('option_code')
-                volume = record.get('volume', 0)
-                timestamp = record.get('timestamp', '')
-                
-                if option_code:
-                    # 保留最新的成交量记录
-                    if option_code not in option_volumes or timestamp > option_volumes[option_code]['timestamp']:
-                        option_volumes[option_code] = {
-                            'volume': int(volume),
-                            'timestamp': timestamp
-                        }
-            
-            # 提取成交量
-            self.today_option_volumes = {
-                code: data['volume'] for code, data in option_volumes.items()
-            }
-            
+            # 从数据库获取当日所有期权的最新成交量
+            self.today_option_volumes = db_manager.get_today_all_option_volumes()
             self.today_volumes_loaded = True
-            self.logger.info(f"V2加载当日期权成交量: {len(self.today_option_volumes)}个期权")
             
+            self.logger.info(f"V2从数据库加载当日期权成交量: {len(self.today_option_volumes)}个期权")
             return self.today_option_volumes
             
         except Exception as e:
-            self.logger.error(f"V2加载当日期权成交量失败: {e}")
+            self.logger.error(f"V2从数据库加载当日期权成交量失败: {e}")
             return {}
     
     def _get_last_recorded_volume(self, option_code: str) -> int:
         """获取数据库中最后记录的期权成交量"""
         try:
-            # 确保已加载当日数据
-            today_volumes = self._load_today_option_volumes()
+            from .database_manager import get_database_manager
+            db_manager = get_database_manager()
             
-            # 返回当日最后记录的成交量，如果没有记录则返回0
-            return today_volumes.get(option_code, 0)
+            # 直接从数据库获取当日最新成交量
+            return db_manager.get_today_option_volume(option_code)
             
         except Exception as e:
-            self.logger.debug(f"V2获取{option_code}最后记录成交量失败: {e}")
+            self.logger.debug(f"V2从数据库获取{option_code}最后记录成交量失败: {e}")
             return 0
     
     def _update_today_volume_cache(self, option_code: str, volume: int):
@@ -138,11 +104,31 @@ class BigOptionsProcessor:
             if not self.today_volumes_loaded:
                 self._load_today_option_volumes()
             
-            # 更新缓存
+            # 更新内存缓存
             self.today_option_volumes[option_code] = volume
             
         except Exception as e:
             self.logger.debug(f"V2更新{option_code}成交量缓存失败: {e}")
+    
+    def _save_to_database(self, trade_info: Dict[str, Any]) -> bool:
+        """保存期权交易数据到SQL数据库"""
+        try:
+            from .database_manager import get_database_manager
+            db_manager = get_database_manager()
+            
+            # 保存到数据库
+            success = db_manager.save_option_trade(trade_info)
+            
+            if success:
+                self.logger.debug(f"V2期权交易数据已保存到数据库: {trade_info.get('option_code')}")
+            else:
+                self.logger.warning(f"V2期权交易数据保存失败: {trade_info.get('option_code')}")
+            
+            return success
+            
+        except Exception as e:
+            self.logger.error(f"V2保存期权交易数据到数据库失败: {e}")
+            return False
     
     def _load_stock_info_from_file(self, stock_code: str) -> Optional[Dict[str, Any]]:
         """从V2系统文件读取单只股票信息"""
@@ -797,6 +783,10 @@ class BigOptionsProcessor:
                             self.logger.error(f"V2获取{option_code}逐笔成交方向失败: {ticker_e}")
                         
                         trade_info['direction'] = direction
+                        
+                        # 保存到SQL数据库
+                        self._save_to_database(trade_info)
+                        
                         big_trades.append(trade_info)
                         
                         direction_display = f", 方向: {direction_text}" if direction_text else ""

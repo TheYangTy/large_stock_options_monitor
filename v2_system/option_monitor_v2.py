@@ -147,7 +147,7 @@ class V2OptionMonitor:
                 
                 # 发送按股票汇总的通知
                 if big_options:
-                    self.notifier.send_stock_grouped_notifications(big_options)
+                    self.notifier.send_v1_style_summary_report(big_options)
                 
             else:
                 self.logger.info("V2系统本次扫描未发现大单期权")

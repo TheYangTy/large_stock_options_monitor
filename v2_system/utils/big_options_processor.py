@@ -17,7 +17,7 @@ import sys
 
 # 添加V2系统路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import BIG_TRADE_CONFIG, TRADING_HOURS, OPTION_FILTERS, SYSTEM_CONFIG
+from config import BIG_TRADE_CONFIG, HK_TRADING_HOURS, US_TRADING_HOURS_DST, US_TRADING_HOURS_STD, OPTION_FILTERS, SYSTEM_CONFIG
 import futu as ft
 
 

@@ -11,6 +11,22 @@ import webbrowser
 import time
 from threading import Timer
 
+# 将项目根目录与 v2_system 目录加入 sys.path，兼容模块与脚本两种运行方式
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_current_dir)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+if _current_dir not in sys.path:
+    sys.path.insert(0, _current_dir)
+
+# 将项目根目录与 v2_system 目录加入 sys.path，兼容模块与脚本两种运行方式
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_current_dir)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+if _current_dir not in sys.path:
+    sys.path.insert(0, _current_dir)
+
 def check_dependencies():
     """检查依赖包"""
     try:
@@ -42,15 +58,30 @@ def main():
     if not check_dependencies():
         return
     
-    # 检查数据库文件
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    db_path = os.path.join(current_dir, 'data', 'v2_options.db')
-    
-    if not os.path.exists(db_path):
-        print(f"⚠️  数据库文件不存在: {db_path}")
-        print("请先运行V2监控系统生成数据")
-    else:
-        print(f"✓ 数据库文件: {db_path}")
+    # 检查实际使用的数据库（HK/US）
+    try:
+        from v2_system.web_viewer import hk_db_manager, us_db_manager
+        hk_db = getattr(hk_db_manager, 'db_path', None)
+        us_db = getattr(us_db_manager, 'db_path', None)
+
+        print("数据库路径检测：")
+        if hk_db:
+            if os.path.exists(hk_db):
+                print(f"✓ 港股数据库: {hk_db}")
+            else:
+                print(f"⚠️ 港股数据库不存在: {hk_db}")
+        else:
+            print("⚠️ 未获取到港股数据库路径")
+
+        if us_db:
+            if os.path.exists(us_db):
+                print(f"✓ 美股数据库: {us_db}")
+            else:
+                print(f"⚠️ 美股数据库不存在: {us_db}")
+        else:
+            print("⚠️ 未获取到美股数据库路径")
+    except Exception as e:
+        print(f"数据库路径检测失败: {e}")
     
     # 启动Web服务器
     print("\n启动Web服务器...")
@@ -63,17 +94,10 @@ def main():
     
     # 启动Flask应用
     try:
-        from .web_viewer import app
+        from v2_system.web_viewer import app
         app.run(debug=False, host='0.0.0.0', port=5001)
     except KeyboardInterrupt:
         print("\n服务器已停止")
-    except ImportError:
-        # 如果相对导入失败，尝试直接导入
-        try:
-            import web_viewer
-            web_viewer.app.run(debug=False, host='0.0.0.0', port=5001)
-        except Exception as e:
-            print(f"启动失败: {e}")
     except Exception as e:
         print(f"启动失败: {e}")
 

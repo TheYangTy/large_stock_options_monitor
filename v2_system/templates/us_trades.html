@@ -40,6 +40,7 @@
     </div>
     <div class="card-body">
         <form method="GET" action="{{ url_for('trades', market='US') }}">
+            <input type="hidden" name="per_page" value="{{ pagination.per_page if pagination and pagination.per_page else 50 }}">
             <div class="row g-3">
                 <div class="col-md-3">
                     <label for="stock_code" class="form-label">股票代码</label>
@@ -183,6 +184,7 @@
         {% if pagination.has_prev %}
             <li class="page-item">
                 <a class="page-link" href="{{ url_for('trades', market='US', page=pagination.prev_num, 
+                    per_page=pagination.per_page,
                     stock_code=filters.stock_code, option_code=filters.option_code, 
                     date_from=filters.date_from, date_to=filters.date_to) }}">
                     <i class="bi bi-chevron-left"></i> 上一页
@@ -198,6 +200,7 @@
             {% elif page_num <= 3 or page_num > pagination.pages - 3 or (page_num >= pagination.page - 1 and page_num <= pagination.page + 1) %}
                 <li class="page-item">
                     <a class="page-link" href="{{ url_for('trades', market='US', page=page_num, 
+                        per_page=pagination.per_page,
                         stock_code=filters.stock_code, option_code=filters.option_code, 
                         date_from=filters.date_from, date_to=filters.date_to) }}">
                         {{ page_num }}
@@ -213,6 +216,7 @@
         {% if pagination.has_next %}
             <li class="page-item">
                 <a class="page-link" href="{{ url_for('trades', market='US', page=pagination.next_num, 
+                    per_page=pagination.per_page,
                     stock_code=filters.stock_code, option_code=filters.option_code, 
                     date_from=filters.date_from, date_to=filters.date_to) }}">
                     下一页 <i class="bi bi-chevron-right"></i>

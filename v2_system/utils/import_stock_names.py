@@ -290,12 +290,26 @@ def create_example_jsonl(output_file: str):
     logger = logging.getLogger("StockNameImporter")
     
     example_data = [
-        {"stock_code": "HK.00700", "stock_name": "腾讯控股", "current_price": 600.0, "currency": "HKD"},
-        {"stock_code": "HK.09988", "stock_name": "阿里巴巴-SW", "current_price": 80.0, "currency": "HKD"},
-        {"stock_code": "HK.03690", "stock_name": "美团-W", "current_price": 120.0, "currency": "HKD"},
-        {"stock_code": "US.AAPL", "stock_name": "苹果", "current_price": 150.0, "currency": "USD"},
-        {"stock_code": "US.MSFT", "stock_name": "微软", "current_price": 300.0, "currency": "USD"},
-        {"stock_code": "US.GOOGL", "stock_name": "谷歌", "current_price": 120.0, "currency": "USD"}
+        {"stock_code": "HK.00700", "stock_name": "腾讯控股", "current_price": 643.0, "currency": "HKD"},
+        {"stock_code": "HK.09988", "stock_name": "阿里巴巴", "current_price": 151.0, "currency": "HKD"},
+        {"stock_code": "HK.03690", "stock_name": "美团", "current_price": 96.5, "currency": "HKD"},
+        {"stock_code": "HK.01810", "stock_name": "小米集团", "current_price": 55.1, "currency": "HKD"},
+        {"stock_code": "HK.09618", "stock_name": "京东集团", "current_price": 131.7, "currency": "HKD"},
+        {"stock_code": "HK.02318", "stock_name": "中国平安", "current_price": 57.1, "currency": "HKD"},
+        {"stock_code": "HK.00388", "stock_name": "香港交易所", "current_price": 448.4, "currency": "HKD"},
+        {"stock_code": "HK.00981", "stock_name": "中芯国际", "current_price": 63.0, "currency": "HKD"},
+        {"stock_code": "HK.02020", "stock_name": "安踏体育", "current_price": 93.0, "currency": "HKD"},
+        {"stock_code": "HK.01024", "stock_name": "快手", "current_price": 75.0, "currency": "HKD"},
+        {"stock_code": "US.AAPL", "stock_name": "苹果", "current_price": 234.0, "currency": "USD"},
+        {"stock_code": "US.MSFT", "stock_name": "微软", "current_price": 509.0, "currency": "USD"},
+        {"stock_code": "US.GOOGL", "stock_name": "谷歌", "current_price": 241.0, "currency": "USD"},
+        {"stock_code": "US.AMZN", "stock_name": "亚马逊", "current_price": 229.0, "currency": "USD"},
+        {"stock_code": "US.TSLA", "stock_name": "特斯拉", "current_price": 396.0, "currency": "USD"},
+        {"stock_code": "US.META", "stock_name": "Meta", "current_price": 755.0, "currency": "USD"},
+        {"stock_code": "US.NVDA", "stock_name": "英伟达", "current_price": 117.5, "currency": "USD"},
+        {"stock_code": "US.NFLX", "stock_name": "奈飞", "current_price": 1188.0, "currency": "USD"},
+        {"stock_code": "US.AMD", "stock_name": "AMD", "current_price": 158.0, "currency": "USD"},
+        {"stock_code": "US.CRM", "stock_name": "Salesforce", "current_price": 242.7, "currency": "USD"}
     ]
     
     try:

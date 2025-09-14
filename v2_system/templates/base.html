@@ -49,12 +49,12 @@
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('trades') }}">
+                        <a class="nav-link" href="{{ url_for('trades', market=(market if market is defined and market else 'HK')) }}">
                             <i class="bi bi-list-ul"></i> 交易记录
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('stocks') }}">
+                        <a class="nav-link" href="{{ url_for('stocks', market=(market if market is defined and market else 'HK')) }}">
                             <i class="bi bi-bar-chart"></i> 股票统计
                         </a>
                     </li>

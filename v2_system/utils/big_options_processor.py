@@ -831,7 +831,6 @@ class BigOptionsProcessor:
                         # 默认价格和名称
                         # 使用config.py中的get_stock_name函数获取股票名称
                         stock_name = get_stock_name(stock_code)
-                        stock_name = stock_names.get(stock_code, stock_code)
                         
                         default_prices = {
                             'HK.00700': 600.0, 'HK.09988': 130.0, 'HK.03690': 120.0,

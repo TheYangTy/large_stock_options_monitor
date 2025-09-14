@@ -570,33 +570,32 @@ class BigOptionsProcessor:
             
             # 使用默认股票信息
             default_stocks = {
-                    # 港股
-                    'HK.00700': {'price': 600.0, 'name': '腾讯控股'},
-                    'HK.09988': {'price': 80.0, 'name': '阿里巴巴-SW'},
-                    'HK.03690': {'price': 120.0, 'name': '美团-W'},
-                    'HK.01810': {'price': 12.0, 'name': '小米集团-W'},
-                    'HK.09618': {'price': 120.0, 'name': '京东集团-SW'},
-                    'HK.02318': {'price': 40.0, 'name': '中国平安'},
-                    'HK.00388': {'price': 300.0, 'name': '香港交易所'},
-                    
-                    # 美股
-                    'US.AAPL': {'price': 150.0, 'name': '苹果'},
-                    'US.MSFT': {'price': 300.0, 'name': '微软'},
-                    'US.GOOGL': {'price': 120.0, 'name': '谷歌'},
-                    'US.AMZN': {'price': 130.0, 'name': '亚马逊'},
-                    'US.TSLA': {'price': 250.0, 'name': '特斯拉'},
-                    'US.META': {'price': 280.0, 'name': 'Meta'},
-                    'US.NVDA': {'price': 400.0, 'name': '英伟达'},
-                    'US.NFLX': {'price': 400.0, 'name': '奈飞'},
-                    'US.AMD': {'price': 120.0, 'name': 'AMD'},
-                    'US.CRM': {'price': 200.0, 'name': 'Salesforce'}
-                },
+                # 港股
+                'HK.00700': {'price': 600.0, 'name': '腾讯控股'},
+                'HK.09988': {'price': 80.0, 'name': '阿里巴巴-SW'},
                 'HK.03690': {'price': 120.0, 'name': '美团-W'},
                 'HK.01810': {'price': 12.0, 'name': '小米集团-W'},
                 'HK.09618': {'price': 120.0, 'name': '京东集团-SW'},
                 'HK.02318': {'price': 40.0, 'name': '中国平安'},
                 'HK.00388': {'price': 300.0, 'name': '香港交易所'},
-            }
+                'HK.03690': {'price': 120.0, 'name': '美团-W'},
+                'HK.01810': {'price': 12.0, 'name': '小米集团-W'},
+                'HK.09618': {'price': 120.0, 'name': '京东集团-SW'},
+                'HK.02318': {'price': 40.0, 'name': '中国平安'},
+                'HK.00388': {'price': 300.0, 'name': '香港交易所'},
+                    
+                # 美股
+                'US.AAPL': {'price': 150.0, 'name': '苹果'},
+                'US.MSFT': {'price': 300.0, 'name': '微软'},
+                'US.GOOGL': {'price': 120.0, 'name': '谷歌'},
+                'US.AMZN': {'price': 130.0, 'name': '亚马逊'},
+                'US.TSLA': {'price': 250.0, 'name': '特斯拉'},
+                'US.META': {'price': 280.0, 'name': 'Meta'},
+                'US.NVDA': {'price': 400.0, 'name': '英伟达'},
+                'US.NFLX': {'price': 400.0, 'name': '奈飞'},
+                'US.AMD': {'price': 120.0, 'name': 'AMD'},
+                'US.CRM': {'price': 200.0, 'name': 'Salesforce'}
+            },
             
             if stock_code in default_stocks:
                 stock_info = default_stocks[stock_code]

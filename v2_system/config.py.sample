@@ -22,8 +22,9 @@ FUTU_CONFIG = {
 }
 
 # ==================== 数据库配置 ====================
-DATABASE_CONFIG = {
-    'db_path': 'data/options_monitor_v2.db',
+# 港股数据库配置
+HK_DATABASE_CONFIG = {
+    'db_path': 'data/hk_options_monitor_v2.db',
     'backup_enabled': True,
     'backup_interval': 24,  # 小时
     'backup_keep_days': 30,
@@ -33,8 +34,31 @@ DATABASE_CONFIG = {
     'connection_timeout': 30,
 }
 
+# 美股数据库配置
+US_DATABASE_CONFIG = {
+    'db_path': 'data/us_options_monitor_v2.db',
+    'backup_enabled': True,
+    'backup_interval': 24,  # 小时
+    'backup_keep_days': 30,
+    'auto_cleanup_enabled': True,
+    'cleanup_days': 90,  # 保留90天数据
+    'batch_size': 1000,
+    'connection_timeout': 30,
+}
+
+# 向后兼容的数据库配置（默认使用港股）
+DATABASE_CONFIG = HK_DATABASE_CONFIG
+
+def get_database_config(market: str = 'HK') -> Dict[str, Any]:
+    """根据市场获取数据库配置"""
+    if market == 'US':
+        return US_DATABASE_CONFIG
+    else:
+        return HK_DATABASE_CONFIG
+
 # ==================== 监控股票配置 ====================
-MONITOR_STOCKS = [
+# 港股监控列表
+HK_MONITOR_STOCKS = [
     'HK.00700',  # 腾讯控股
     'HK.09988',  # 阿里巴巴
     'HK.03690',  # 美团
@@ -47,8 +71,52 @@ MONITOR_STOCKS = [
     'HK.01024',  # 快手
 ]
 
+# 美股监控列表
+US_MONITOR_STOCKS = [
+    'US.AAPL',   # 苹果
+    'US.MSFT',   # 微软
+    'US.GOOGL',  # 谷歌
+    'US.AMZN',   # 亚马逊
+    'US.TSLA',   # 特斯拉
+    'US.META',   # Meta
+    'US.NVDA',   # 英伟达
+    'US.NFLX',   # 奈飞
+    'US.AMD',    # AMD
+    'US.CRM',    # Salesforce
+]
+
+# 合并所有监控股票（向后兼容）
+MONITOR_STOCKS = HK_MONITOR_STOCKS + US_MONITOR_STOCKS
+
 # ==================== 期权过滤配置 ====================
 OPTION_FILTERS = {
+    # 港股默认配置
+    'hk_default': {
+        'min_volume': 10,           # 最小成交量
+        'min_turnover': 200000,      # 最小成交额(港币)
+        'min_price': 0.001,         # 最小期权价格
+        'max_price': 30,          # 最大期权价格
+        'min_days_to_expiry': 1,    # 最小到期天数
+        'max_days_to_expiry': 365,  # 最大到期天数
+        'enable_call': True,        # 监控看涨期权
+        'enable_put': True,         # 监控看跌期权
+        'min_importance_score': 60, # 最小重要性分数
+    },
+    
+    # 美股默认配置
+    'us_default': {
+        'min_volume': 50,           # 最小成交量(美股期权成交量通常更大)
+        'min_turnover': 50000,      # 最小成交额(美元)
+        'min_price': 0.01,          # 最小期权价格
+        'max_price': 100,           # 最大期权价格
+        'min_days_to_expiry': 1,    # 最小到期天数
+        'max_days_to_expiry': 365,  # 最大到期天数
+        'enable_call': True,        # 监控看涨期权
+        'enable_put': True,         # 监控看跌期权
+        'min_importance_score': 60, # 最小重要性分数
+    },
+    
+    # 向后兼容
     'default': {
         'min_volume': 10,           # 最小成交量
         'min_turnover': 200000,      # 最小成交额(港币)
@@ -61,7 +129,7 @@ OPTION_FILTERS = {
         'min_importance_score': 60, # 最小重要性分数
     },
     
-    # 特定股票的过滤配置
+    # 港股特定股票配置
     'HK.00700': {  # 腾讯控股
         'min_volume': 20,
         'min_turnover': 200000,
@@ -78,6 +146,25 @@ OPTION_FILTERS = {
         'min_volume': 15,
         'min_turnover': 120000,
         'min_importance_score': 65,
+    },
+    
+    # 美股特定股票配置
+    'US.AAPL': {  # 苹果
+        'min_volume': 100,
+        'min_turnover': 100000,
+        'min_importance_score': 70,
+    },
+    
+    'US.TSLA': {  # 特斯拉
+        'min_volume': 80,
+        'min_turnover': 80000,
+        'min_importance_score': 70,
+    },
+    
+    'US.NVDA': {  # 英伟达
+        'min_volume': 80,
+        'min_turnover': 80000,
+        'min_importance_score': 70,
     },
 }
 
@@ -111,10 +198,12 @@ NOTIFICATION = {
     },
     
     # 企业微信机器人通知
-    'enable_wework_bot': False,
+    'enable_wework_bot': True,
     'wework_config': {
-        'webhook_url': '',  # 主要webhook URL
-        'extra_webhook_urls': [],  # 额外的webhook URL列表
+        'webhook_url': 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx',  # 主要webhook URL
+        'extra_webhook_urls': [
+            'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx'
+        ],  # 额外的webhook URL列表
         'mentioned_list': [],  # @用户列表
         'mentioned_mobile_list': [],  # @手机号列表
         'enable_summary': True,  # 启用汇总通知
@@ -127,13 +216,39 @@ NOTIFICATION = {
 }
 
 # ==================== 交易时间配置 ====================
-TRADING_HOURS = {
+# 港股交易时间
+HK_TRADING_HOURS = {
     'market_open': '09:30',
     'market_close': '16:00',
     'lunch_break_start': '12:00',
     'lunch_break_end': '13:00',
     'timezone': 'Asia/Hong_Kong',
+    'weekdays_only': True,  # 只在工作日开市
+    'update_data_off_hours': True,  # 非开市时间是否更新数据 (调试开关)
 }
+
+# 美股交易时间 (夏令时)
+US_TRADING_HOURS_DST = {
+    'market_open': '21:30',  # 美东时间09:30对应北京时间21:30
+    'market_close': '04:00',  # 美东时间16:00对应北京时间04:00+1天
+    'timezone': 'US/Eastern',
+    'weekdays_only': True,
+    'crosses_midnight': True,  # 跨越午夜
+    'update_data_off_hours': True,  # 非开市时间是否更新数据 (调试开关)
+}
+
+# 美股交易时间 (冬令时)
+US_TRADING_HOURS_STD = {
+    'market_open': '22:30',  # 美东时间09:30对应北京时间22:30
+    'market_close': '05:00',  # 美东时间16:00对应北京时间05:00+1天
+    'timezone': 'US/Eastern',
+    'weekdays_only': True,
+    'crosses_midnight': True,  # 跨越午夜
+    'update_data_off_hours': True,  # 非开市时间是否更新数据 (调试开关)
+}
+
+# 向后兼容
+TRADING_HOURS = HK_TRADING_HOURS
 
 # ==================== 系统配置 ====================
 SYSTEM_CONFIG = {
@@ -198,6 +313,16 @@ ANALYSIS_CONFIG = {
 }
 
 # ==================== 辅助函数 ====================
+def get_market_type(stock_code: str) -> str:
+    """根据股票代码判断市场类型"""
+    if stock_code.startswith('HK.'):
+        return 'HK'
+    elif stock_code.startswith('US.'):
+        return 'US'
+    else:
+        # 默认返回港股
+        return 'HK'
+
 def get_option_filter(stock_code: str) -> Dict[str, Any]:
     """获取股票的期权过滤配置"""
     default_filter = OPTION_FILTERS['default'].copy()
@@ -208,6 +333,7 @@ def get_option_filter(stock_code: str) -> Dict[str, Any]:
 def get_stock_name(stock_code: str) -> str:
     """获取股票名称"""
     stock_names = {
+        # 港股
         'HK.00700': '腾讯控股',
         'HK.09988': '阿里巴巴',
         'HK.03690': '美团',
@@ -218,8 +344,204 @@ def get_stock_name(stock_code: str) -> str:
         'HK.00981': '中芯国际',
         'HK.02020': '安踏体育',
         'HK.01024': '快手',
+        
+        # 美股
+        'US.AAPL': '苹果',
+        'US.MSFT': '微软',
+        'US.GOOGL': '谷歌',
+        'US.AMZN': '亚马逊',
+        'US.TSLA': '特斯拉',
+        'US.META': 'Meta',
+        'US.NVDA': '英伟达',
+        'US.NFLX': '奈飞',
+        'US.AMD': 'AMD',
+        'US.CRM': 'Salesforce',
     }
     return stock_names.get(stock_code, stock_code)
+
+def get_market_from_code(stock_code: str) -> str:
+    """从股票代码获取市场类型"""
+    if stock_code.startswith('HK.'):
+        return 'HK'
+    elif stock_code.startswith('US.'):
+        return 'US'
+    else:
+        return 'UNKNOWN'
+
+def get_option_filter_by_market(stock_code: str) -> Dict[str, Any]:
+    """根据市场获取期权过滤配置"""
+    market = get_market_from_code(stock_code)
+    
+    # 先尝试获取特定股票的配置
+    if stock_code in OPTION_FILTERS:
+        specific_filter = OPTION_FILTERS[stock_code].copy()
+        # 获取市场默认配置作为基础
+        if market == 'HK':
+            base_filter = OPTION_FILTERS['hk_default'].copy()
+        elif market == 'US':
+            base_filter = OPTION_FILTERS['us_default'].copy()
+        else:
+            base_filter = OPTION_FILTERS['default'].copy()
+        
+        # 合并配置
+        base_filter.update(specific_filter)
+        return base_filter
+    
+    # 使用市场默认配置
+    if market == 'HK':
+        return OPTION_FILTERS['hk_default'].copy()
+    elif market == 'US':
+        return OPTION_FILTERS['us_default'].copy()
+    else:
+        return OPTION_FILTERS['default'].copy()
+
+def is_us_dst() -> bool:
+    """判断当前是否为美国夏令时"""
+    from datetime import datetime
+    import calendar
+    
+    now = datetime.now()
+    year = now.year
+    
+    # 夏令时：3月第二个周日到11月第一个周日
+    # 3月第二个周日
+    march_second_sunday = None
+    for day in range(8, 15):  # 第二个周日在8-14日之间
+        if calendar.weekday(year, 3, day) == 6:  # 周日
+            march_second_sunday = day
+            break
+    
+    # 11月第一个周日
+    november_first_sunday = None
+    for day in range(1, 8):  # 第一个周日在1-7日之间
+        if calendar.weekday(year, 11, day) == 6:  # 周日
+            november_first_sunday = day
+            break
+    
+    if march_second_sunday and november_first_sunday:
+        dst_start = datetime(year, 3, march_second_sunday)
+        dst_end = datetime(year, 11, november_first_sunday)
+        return dst_start <= now < dst_end
+    
+    return False
+
+def is_hk_trading_time() -> bool:
+    """判断当前是否为港股交易时间"""
+    return is_market_trading_time('HK')
+
+def is_us_trading_time() -> bool:
+    """判断当前是否为美股交易时间"""
+    return is_market_trading_time('US')
+
+def is_market_trading_time(market: str) -> bool:
+    """判断指定市场是否在交易时间"""
+    from datetime import datetime
+    
+    try:
+        now = datetime.now()
+        current_time = now.strftime('%H:%M')
+        
+        if market == 'HK':
+            # 港股交易时间判断
+            if now.weekday() >= 5:  # 周六日
+                return False
+            
+            market_open = HK_TRADING_HOURS['market_open']
+            market_close = HK_TRADING_HOURS['market_close']
+            lunch_start = HK_TRADING_HOURS['lunch_break_start']
+            lunch_end = HK_TRADING_HOURS['lunch_break_end']
+            
+            # 上午时段：09:30-12:00
+            if market_open <= current_time < lunch_start:
+                return True
+            
+            # 下午时段：13:00-16:00
+            if lunch_end <= current_time < market_close:
+                return True
+            
+            return False
+            
+        elif market == 'US':
+            # 美股交易时间判断
+            if now.weekday() >= 5:  # 周六日
+                return False
+            
+            # 根据夏令时/冬令时选择交易时间
+            if is_us_dst():
+                trading_hours = US_TRADING_HOURS_DST
+            else:
+                trading_hours = US_TRADING_HOURS_STD
+            
+            market_open = trading_hours['market_open']
+            market_close = trading_hours['market_close']
+            
+            # 美股交易时间跨越午夜
+            if trading_hours.get('crosses_midnight', False):
+                # 当前时间在开市时间之后（当天）或收市时间之前（次日）
+                if current_time >= market_open or current_time < market_close:
+                    return True
+            else:
+                # 正常时间段
+                if market_open <= current_time < market_close:
+                    return True
+            
+            return False
+        
+        return False
+        
+    except Exception as e:
+        print(f"判断{market}市场交易时间时出错: {e}")
+        return False
+
+def should_send_to_extra_webhooks() -> bool:
+    """判断是否应该向额外的webhook发送消息（支持多市场）"""
+    try:
+        # 检查港股或美股是否有任一市场在交易时间
+        hk_trading = is_market_trading_time('HK')
+        us_trading = is_market_trading_time('US')
+        
+        # 任一市场在交易时间就发送额外webhook
+        return hk_trading or us_trading
+        
+    except Exception as e:
+        # 异常时默认为非交易时间，不发送额外webhook
+        print(f"判断开市时间时出错: {e}")
+        return False
+
+def should_update_data_off_hours(market: str) -> bool:
+    """判断指定市场是否允许在非开市时间更新数据"""
+    try:
+        if market == 'HK':
+            return HK_TRADING_HOURS.get('update_data_off_hours', True)
+        elif market == 'US':
+            # 根据夏令时/冬令时选择配置
+            if is_us_dst():
+                return US_TRADING_HOURS_DST.get('update_data_off_hours', True)
+            else:
+                return US_TRADING_HOURS_STD.get('update_data_off_hours', True)
+        else:
+            # 未知市场默认允许更新
+            return True
+    except Exception as e:
+        print(f"判断{market}市场非开市时间更新配置时出错: {e}")
+        return True
+
+def should_monitor_market(market: str) -> bool:
+    """判断是否应该监控指定市场（综合考虑交易时间和调试开关）"""
+    try:
+        is_trading = is_market_trading_time(market)
+        allow_off_hours = should_update_data_off_hours(market)
+        
+        # 如果在交易时间，总是监控
+        if is_trading:
+            return True
+        
+        # 如果不在交易时间，检查是否允许非开市时间更新
+        return allow_off_hours
+        
+    except Exception as e:
+        print(f"判断{market}市场监控状态时出错: {e}")
+        return True
 
 def validate_config():
     """验证配置有效性"""
@@ -293,6 +615,8 @@ load_from_env()
 
 # 兼容性别名
 MONITOR_STOCK_CODES = MONITOR_STOCKS
+STOCK_CODES = HK_MONITOR_STOCKS  # 港股代码别名
+US_STOCK_CODES = US_MONITOR_STOCKS  # 美股代码别名
 OPTION_FILTER = OPTION_FILTERS['default']
 MONITOR_TIME = TRADING_HOURS
 

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-修正数据库中所有期权交易记录的变化量计算
-使用正确的逻辑：与上一条记录比较，而不是与今日最新记录比较
+修正多市场数据库中的数据问题：
+1. 修正变化量计算（与上一条记录比较）
+2. 修正股票名称（从stock_info表补充）
+3. 清理跨市场数据污染（US数据库删除HK数据，HK数据库删除US数据）
 """
 
 import os
@@ -19,21 +21,29 @@ from config import DATABASE_CONFIG
 from utils.logger import setup_logger
 
 
-class VolumeFixProcessor:
-    """变化量和股票名称修正处理器"""
+class MultiMarketVolumeFixProcessor:
+    """多市场变化量和数据清理修正处理器"""
     
     def __init__(self):
-        self.logger = setup_logger('VolumeFixProcessor')
-        self.db_path = DATABASE_CONFIG['db_path']
+        self.logger = setup_logger('MultiMarketVolumeFixProcessor')
+        # 获取两个市场的数据库路径
+        base_path = DATABASE_CONFIG['db_path']  # data/hk_options_monitor_v2.db
+        data_dir = os.path.dirname(base_path)
         
-    def get_all_trades_by_date(self) -> Dict[str, List[Tuple]]:
-        """获取所有交易记录，按日期分组"""
+        self.hk_db_path = os.path.join(data_dir, 'hk_options_monitor_v2.db')
+        self.us_db_path = os.path.join(data_dir, 'us_options_monitor_v2.db')
+        
+        self.logger.info(f"HK数据库路径: {self.hk_db_path}")
+        self.logger.info(f"US数据库路径: {self.us_db_path}")
+        
+    def get_all_trades_by_date(self, db_path: str, market: str) -> Dict[str, List[Tuple]]:
+        """获取指定数据库的所有交易记录，按日期分组"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(db_path) as conn:
                 cursor = conn.cursor()
                 
                 cursor.execute("""
-                    SELECT id, option_code, trade_date, volume, timestamp, volume_diff, last_volume
+                    SELECT id, option_code, trade_date, volume, timestamp, volume_diff, last_volume, stock_code
                     FROM option_trades 
                     ORDER BY trade_date, option_code, timestamp
                 """)
@@ -48,18 +58,58 @@ class VolumeFixProcessor:
                         trades_by_date[trade_date] = []
                     trades_by_date[trade_date].append(record)
                 
+                self.logger.info(f"{market}数据库共找到 {len(all_records)} 条交易记录")
                 return trades_by_date
                 
         except Exception as e:
-            self.logger.error(f"获取交易记录失败: {e}")
+            self.logger.error(f"获取{market}数据库交易记录失败: {e}")
             return {}
     
-    def calculate_correct_volume_diff(self, trades_by_date: Dict[str, List[Tuple]]) -> List[Tuple]:
+    def clean_cross_market_data(self, db_path: str, market: str) -> bool:
+        """清理跨市场数据污染"""
+        try:
+            with sqlite3.connect(db_path) as conn:
+                cursor = conn.cursor()
+                
+                if market == 'HK':
+                    # 从HK数据库删除US数据（股票代码以US.开头的）
+                    cursor.execute("SELECT COUNT(*) FROM option_trades WHERE stock_code LIKE 'US.%'")
+                    us_count = cursor.fetchone()[0]
+                    
+                    if us_count > 0:
+                        self.logger.info(f"在HK数据库中发现 {us_count} 条US数据，准备删除...")
+                        cursor.execute("DELETE FROM option_trades WHERE stock_code LIKE 'US.%'")
+                        deleted_count = cursor.rowcount
+                        self.logger.info(f"从HK数据库删除了 {deleted_count} 条US数据")
+                    else:
+                        self.logger.info("HK数据库中没有发现US数据")
+                        
+                elif market == 'US':
+                    # 从US数据库删除HK数据（股票代码以HK.开头的）
+                    cursor.execute("SELECT COUNT(*) FROM option_trades WHERE stock_code LIKE 'HK.%'")
+                    hk_count = cursor.fetchone()[0]
+                    
+                    if hk_count > 0:
+                        self.logger.info(f"在US数据库中发现 {hk_count} 条HK数据，准备删除...")
+                        cursor.execute("DELETE FROM option_trades WHERE stock_code LIKE 'HK.%'")
+                        deleted_count = cursor.rowcount
+                        self.logger.info(f"从US数据库删除了 {deleted_count} 条HK数据")
+                    else:
+                        self.logger.info("US数据库中没有发现HK数据")
+                
+                conn.commit()
+                return True
+                
+        except Exception as e:
+            self.logger.error(f"清理{market}数据库跨市场数据失败: {e}")
+            return False
+    
+    def calculate_correct_volume_diff(self, trades_by_date: Dict[str, List[Tuple]], market: str) -> List[Tuple]:
         """计算正确的变化量"""
         updates = []
         
         for trade_date, records in trades_by_date.items():
-            self.logger.info(f"处理日期: {trade_date}, 记录数: {len(records)}")
+            self.logger.info(f"处理{market}市场日期: {trade_date}, 记录数: {len(records)}")
             
             # 按期权代码分组
             trades_by_option = {}
@@ -97,10 +147,10 @@ class VolumeFixProcessor:
         
         return updates
     
-    def update_database(self, updates: List[Tuple]) -> bool:
-        """批量更新数据库"""
+    def update_database(self, db_path: str, market: str, updates: List[Tuple]) -> bool:
+        """批量更新指定数据库"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(db_path) as conn:
                 cursor = conn.cursor()
                 
                 cursor.executemany("""
@@ -110,68 +160,101 @@ class VolumeFixProcessor:
                 """, updates)
                 
                 conn.commit()
-                self.logger.info(f"成功更新 {len(updates)} 条记录")
+                self.logger.info(f"成功更新{market}数据库 {len(updates)} 条记录")
                 return True
                 
         except Exception as e:
-            self.logger.error(f"更新数据库失败: {e}")
+            self.logger.error(f"更新{market}数据库失败: {e}")
             return False
     
     def fix_all_data(self) -> bool:
-        """修正所有数据（变化量和股票名称）"""
+        """修正所有数据（跨市场数据清理、变化量和股票名称）"""
         try:
-            self.logger.info("开始修正数据库中的数据...")
+            self.logger.info("开始修正多市场数据库中的数据...")
             
-            # 1. 修正变化量
-            self.logger.info("=" * 50)
-            self.logger.info("第一步：修正变化量")
-            self.logger.info("=" * 50)
+            # 检查数据库文件是否存在
+            markets_to_process = []
+            if os.path.exists(self.hk_db_path):
+                markets_to_process.append(('HK', self.hk_db_path))
+            else:
+                self.logger.warning(f"HK数据库文件不存在: {self.hk_db_path}")
+                
+            if os.path.exists(self.us_db_path):
+                markets_to_process.append(('US', self.us_db_path))
+            else:
+                self.logger.warning(f"US数据库文件不存在: {self.us_db_path}")
             
-            # 获取所有交易记录
-            trades_by_date = self.get_all_trades_by_date()
-            if not trades_by_date:
-                self.logger.warning("没有找到交易记录")
+            if not markets_to_process:
+                self.logger.error("没有找到任何数据库文件")
                 return False
             
-            total_records = sum(len(records) for records in trades_by_date.values())
-            self.logger.info(f"共找到 {total_records} 条交易记录，涉及 {len(trades_by_date)} 个交易日")
+            all_success = True
             
-            # 计算正确的变化量
-            volume_updates = self.calculate_correct_volume_diff(trades_by_date)
-            
-            if volume_updates:
-                self.logger.info(f"需要更新 {len(volume_updates)} 条记录的变化量")
-                volume_success = self.update_database(volume_updates)
-                if volume_success:
-                    self.logger.info("✅ 变化量修正完成！")
+            for market, db_path in markets_to_process:
+                self.logger.info("=" * 60)
+                self.logger.info(f"处理 {market} 市场数据库: {db_path}")
+                self.logger.info("=" * 60)
+                
+                # 1. 清理跨市场数据污染
+                self.logger.info(f"第一步：清理{market}数据库中的跨市场数据")
+                self.logger.info("-" * 40)
+                
+                clean_success = self.clean_cross_market_data(db_path, market)
+                if clean_success:
+                    self.logger.info(f"✅ {market}数据库跨市场数据清理完成！")
                 else:
-                    self.logger.error("❌ 变化量修正失败！")
-                    return False
-            else:
-                self.logger.info("✅ 所有记录的变化量都是正确的，无需更新")
-                volume_success = True
+                    self.logger.error(f"❌ {market}数据库跨市场数据清理失败！")
+                    all_success = False
+                    continue
+                
+                # 2. 修正变化量
+                self.logger.info(f"第二步：修正{market}数据库变化量")
+                self.logger.info("-" * 40)
+                
+                # 获取交易记录
+                trades_by_date = self.get_all_trades_by_date(db_path, market)
+                if not trades_by_date:
+                    self.logger.warning(f"{market}数据库没有找到交易记录")
+                    continue
+                
+                total_records = sum(len(records) for records in trades_by_date.values())
+                self.logger.info(f"{market}数据库共找到 {total_records} 条交易记录，涉及 {len(trades_by_date)} 个交易日")
+                
+                # 计算正确的变化量
+                volume_updates = self.calculate_correct_volume_diff(trades_by_date, market)
+                
+                if volume_updates:
+                    self.logger.info(f"{market}数据库需要更新 {len(volume_updates)} 条记录的变化量")
+                    volume_success = self.update_database(db_path, market, volume_updates)
+                    if volume_success:
+                        self.logger.info(f"✅ {market}数据库变化量修正完成！")
+                    else:
+                        self.logger.error(f"❌ {market}数据库变化量修正失败！")
+                        all_success = False
+                else:
+                    self.logger.info(f"✅ {market}数据库所有记录的变化量都是正确的，无需更新")
+                
+                # 3. 修正股票名称
+                self.logger.info(f"第三步：修正{market}数据库股票名称")
+                self.logger.info("-" * 40)
+                
+                name_success = self.fix_stock_names(db_path, market)
+                if name_success:
+                    self.logger.info(f"✅ {market}数据库股票名称修正完成！")
+                else:
+                    self.logger.error(f"❌ {market}数据库股票名称修正失败！")
+                    all_success = False
             
-            # 2. 修正股票名称
-            self.logger.info("=" * 50)
-            self.logger.info("第二步：修正股票名称")
-            self.logger.info("=" * 50)
-            
-            name_success = self.fix_stock_names()
-            if name_success:
-                self.logger.info("✅ 股票名称修正完成！")
-            else:
-                self.logger.error("❌ 股票名称修正失败！")
-            
-            return volume_success and name_success
+            return all_success
             
         except Exception as e:
             self.logger.error(f"修正数据过程中出错: {e}")
             return False
     
-    def get_stock_names_from_stock_info(self) -> Dict[str, str]:
-        """从stock_info表获取股票名称映射"""
+    def get_stock_names_from_stock_info(self, db_path: str, market: str) -> Dict[str, str]:
+        """从指定数据库的stock_info表获取股票名称映射"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(db_path) as conn:
                 cursor = conn.cursor()
                 
                 cursor.execute("""
@@ -183,26 +266,26 @@ class VolumeFixProcessor:
                 results = cursor.fetchall()
                 stock_names = {stock_code: stock_name for stock_code, stock_name in results}
                 
-                self.logger.info(f"从stock_info表获取到 {len(stock_names)} 个股票名称")
+                self.logger.info(f"从{market}数据库stock_info表获取到 {len(stock_names)} 个股票名称")
                 return stock_names
                 
         except Exception as e:
-            self.logger.error(f"获取股票名称映射失败: {e}")
+            self.logger.error(f"获取{market}数据库股票名称映射失败: {e}")
             return {}
     
-    def fix_stock_names(self) -> bool:
-        """修正option_trades表中的股票名称"""
+    def fix_stock_names(self, db_path: str, market: str) -> bool:
+        """修正指定数据库option_trades表中的股票名称"""
         try:
-            self.logger.info("开始修正股票名称...")
+            self.logger.info(f"开始修正{market}数据库股票名称...")
             
             # 获取股票名称映射
-            stock_names = self.get_stock_names_from_stock_info()
+            stock_names = self.get_stock_names_from_stock_info(db_path, market)
             if not stock_names:
-                self.logger.warning("没有找到股票名称数据")
+                self.logger.warning(f"{market}数据库没有找到股票名称数据")
                 return False
             
             # 查找需要更新的记录
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(db_path) as conn:
                 cursor = conn.cursor()
                 
                 # 找出股票名称为空或'-'的记录，且在stock_info中有对应名称的
@@ -217,10 +300,10 @@ class VolumeFixProcessor:
                 codes_to_update = [row[0] for row in cursor.fetchall()]
                 
                 if not codes_to_update:
-                    self.logger.info("所有股票名称都已正确，无需更新")
+                    self.logger.info(f"{market}数据库所有股票名称都已正确，无需更新")
                     return True
                 
-                self.logger.info(f"需要更新 {len(codes_to_update)} 个股票代码的名称")
+                self.logger.info(f"{market}数据库需要更新 {len(codes_to_update)} 个股票代码的名称")
                 
                 # 批量更新股票名称
                 updates = []
@@ -237,49 +320,77 @@ class VolumeFixProcessor:
                 updated_count = cursor.rowcount
                 conn.commit()
                 
-                self.logger.info(f"成功更新 {updated_count} 条记录的股票名称")
+                self.logger.info(f"成功更新{market}数据库 {updated_count} 条记录的股票名称")
                 return True
                 
         except Exception as e:
-            self.logger.error(f"修正股票名称失败: {e}")
+            self.logger.error(f"修正{market}数据库股票名称失败: {e}")
             return False
     
     def verify_fix(self) -> bool:
-        """验证修正结果"""
+        """验证多市场数据库修正结果"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            markets_to_verify = []
+            if os.path.exists(self.hk_db_path):
+                markets_to_verify.append(('HK', self.hk_db_path))
+            if os.path.exists(self.us_db_path):
+                markets_to_verify.append(('US', self.us_db_path))
+            
+            all_success = True
+            
+            for market, db_path in markets_to_verify:
+                self.logger.info(f"验证{market}数据库修正结果...")
                 
-                # 检查是否还有异常的变化量
-                cursor.execute("""
-                    SELECT COUNT(*) FROM option_trades 
-                    WHERE volume_diff < 0 OR volume_diff > volume
-                """)
-                
-                abnormal_volume_count = cursor.fetchone()[0]
-                
-                # 检查是否还有空的股票名称
-                cursor.execute("""
-                    SELECT COUNT(*) FROM option_trades 
-                    WHERE stock_name IS NULL OR stock_name = '' OR stock_name = '-'
-                """)
-                
-                empty_name_count = cursor.fetchone()[0]
-                
-                success = True
-                if abnormal_volume_count > 0:
-                    self.logger.warning(f"仍有 {abnormal_volume_count} 条记录的变化量可能异常")
-                    success = False
-                else:
-                    self.logger.info("所有记录的变化量都正常")
-                
-                if empty_name_count > 0:
-                    self.logger.warning(f"仍有 {empty_name_count} 条记录的股票名称为空")
-                    success = False
-                else:
-                    self.logger.info("所有记录的股票名称都已填充")
-                
-                return success
+                with sqlite3.connect(db_path) as conn:
+                    cursor = conn.cursor()
+                    
+                    # 检查跨市场数据污染
+                    if market == 'HK':
+                        cursor.execute("SELECT COUNT(*) FROM option_trades WHERE stock_code LIKE 'US.%'")
+                        cross_market_count = cursor.fetchone()[0]
+                        if cross_market_count > 0:
+                            self.logger.warning(f"HK数据库仍有 {cross_market_count} 条US数据")
+                            all_success = False
+                        else:
+                            self.logger.info("HK数据库已无US数据污染")
+                    elif market == 'US':
+                        cursor.execute("SELECT COUNT(*) FROM option_trades WHERE stock_code LIKE 'HK.%'")
+                        cross_market_count = cursor.fetchone()[0]
+                        if cross_market_count > 0:
+                            self.logger.warning(f"US数据库仍有 {cross_market_count} 条HK数据")
+                            all_success = False
+                        else:
+                            self.logger.info("US数据库已无HK数据污染")
+                    
+                    # 检查是否还有异常的变化量
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM option_trades 
+                        WHERE volume_diff < 0 OR volume_diff > volume
+                    """)
+                    
+                    abnormal_volume_count = cursor.fetchone()[0]
+                    
+                    # 检查是否还有空的股票名称
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM option_trades 
+                        WHERE stock_name IS NULL OR stock_name = '' OR stock_name = '-'
+                    """)
+                    
+                    empty_name_count = cursor.fetchone()[0]
+                    
+                    if abnormal_volume_count > 0:
+                        self.logger.warning(f"{market}数据库仍有 {abnormal_volume_count} 条记录的变化量可能异常")
+                        all_success = False
+                    else:
+                        self.logger.info(f"{market}数据库所有记录的变化量都正常")
+                    
+                    if empty_name_count > 0:
+                        self.logger.warning(f"{market}数据库仍有 {empty_name_count} 条记录的股票名称为空")
+                        all_success = False
+                    else:
+                        self.logger.info(f"{market}数据库所有记录的股票名称都已填充")
+            
+            return all_success
                     
         except Exception as e:
             self.logger.error(f"验证修正结果失败: {e}")
@@ -288,18 +399,19 @@ class VolumeFixProcessor:
 
 def main():
     """主函数"""
-    print("=" * 60)
-    print("期权交易记录数据修正工具")
-    print("=" * 60)
+    print("=" * 70)
+    print("多市场期权交易记录数据修正工具")
+    print("=" * 70)
     print("功能：")
-    print("1. 修正变化量计算（与上一条记录比较）")
-    print("2. 修正股票名称（从stock_info表补充）")
-    print("=" * 60)
+    print("1. 清理跨市场数据污染（US数据库删除HK数据，HK数据库删除US数据）")
+    print("2. 修正变化量计算（与上一条记录比较）")
+    print("3. 修正股票名称（从stock_info表补充）")
+    print("=" * 70)
     
-    processor = VolumeFixProcessor()
+    processor = MultiMarketVolumeFixProcessor()
     
     # 询问用户确认
-    confirm = input("是否要修正数据库中所有期权交易记录的数据？(y/N): ")
+    confirm = input("是否要修正多市场数据库中所有期权交易记录的数据？(y/N): ")
     if confirm.lower() != 'y':
         print("操作已取消")
         return
@@ -308,9 +420,9 @@ def main():
     success = processor.fix_all_data()
     
     if success:
-        print("\n" + "=" * 60)
-        print("✅ 数据修正成功！")
-        print("=" * 60)
+        print("\n" + "=" * 70)
+        print("✅ 多市场数据修正成功！")
+        print("=" * 70)
         
         # 验证结果
         print("正在验证修正结果...")
@@ -319,9 +431,9 @@ def main():
         else:
             print("⚠️  验证发现异常，请检查日志")
     else:
-        print("\n" + "=" * 60)
-        print("❌ 数据修正失败，请检查日志")
-        print("=" * 60)
+        print("\n" + "=" * 70)
+        print("❌ 多市场数据修正失败，请检查日志")
+        print("=" * 70)
 
 
 if __name__ == "__main__":

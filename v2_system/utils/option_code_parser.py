@@ -25,6 +25,16 @@ class OptionCodeParser:
             # 备用格式: 可能的其他变体
             r'HK\.([A-Z0-9]{2,5})(\d{6})([CP])(\d+)',
         ]
+        
+        # 美股期权代码正则模式
+        # 实际格式: US.TSLA251017P205000 (股票代码TSLA，2025年10月17日，Put，行权价205.000)
+        # 实际格式: US.AAPL250920C180000 (股票代码AAPL，2025年09月20日，Call，行权价180.000)
+        self.us_option_patterns = [
+            # 主要格式: US.{股票代码}{YYMMDD}{C/P}{价格}
+            r'US\.([A-Z]{1,5})(\d{2})(\d{2})(\d{2})([CP])(\d+)',
+            # 备用格式: 可能的其他变体
+            r'US\.([A-Z0-9]{1,5})(\d{6})([CP])(\d+)',
+        ]
     
     def parse_option_code(self, option_code: str) -> Dict[str, Any]:
         """
@@ -60,6 +70,12 @@ class OptionCodeParser:
             # 尝试港股期权格式
             if option_code.startswith('HK.'):
                 parsed = self._parse_hk_option(option_code)
+                if parsed['is_valid']:
+                    return parsed
+            
+            # 尝试美股期权格式
+            elif option_code.startswith('US.'):
+                parsed = self._parse_us_option(option_code)
                 if parsed['is_valid']:
                     return parsed
             
@@ -157,6 +173,73 @@ class OptionCodeParser:
                 logger.debug(f"V2解析行权价格: {strike_raw} -> {strike_price} (股票: {stock_symbol})")
             except ValueError:
                 logger.error(f"V2解析行权价格失败: {strike_raw}")
+                return result
+            
+            result['is_valid'] = True
+            return result
+        
+        return result
+    
+    def _parse_us_option(self, option_code: str) -> Dict[str, Any]:
+        """解析美股期权代码"""
+        result = {
+            'stock_code': None,
+            'option_type': None,
+            'expiry_date': None,
+            'strike_price': None,
+            'is_valid': False,
+            'raw_code': option_code
+        }
+        
+        # 主要模式: US.{股票代码}{YYMMDD}{C/P}{价格}
+        # 例如: US.TSLA251017P205000
+        pattern1 = r'US\.([A-Z]{1,5})(\d{2})(\d{2})(\d{2})([CP])(\d+)'
+        match = re.match(pattern1, option_code)
+        if match:
+            stock_symbol = match.group(1)  # 股票代码，如TSLA, AAPL
+            year = match.group(2)          # 年份，如25
+            month = match.group(3)         # 月份，如10
+            day = match.group(4)           # 日期，如17
+            option_type_char = match.group(5)  # C或P
+            strike_raw = match.group(6)    # 行权价格，如205000
+            
+            # 构建股票代码
+            result['stock_code'] = f'US.{stock_symbol}'
+            
+            # 解析期权类型
+            result['option_type'] = 'Call' if option_type_char == 'C' else 'Put'
+            
+            # 解析到期日
+            try:
+                # 年份处理：25 -> 2025
+                full_year = 2000 + int(year)
+                if full_year < 2020:  # 如果小于2020，认为是下个世纪
+                    full_year += 100
+                
+                expiry_date = date(full_year, int(month), int(day))
+                result['expiry_date'] = expiry_date.strftime('%Y-%m-%d')
+            except ValueError as e:
+                logger.error(f"V2解析美股期权到期日失败: {year}-{month}-{day}, 错误: {e}")
+                return result
+            
+            # 解析行权价格 - 美股期权通常是3位小数
+            try:
+                strike_raw_int = int(strike_raw)
+                
+                # 美股期权价格格式：通常6位数表示3位小数
+                # 例如：205000 = 205.000, 180000 = 180.000
+                if len(strike_raw) >= 6:
+                    strike_price = float(strike_raw_int) / 1000.0
+                elif len(strike_raw) >= 5:
+                    strike_price = float(strike_raw_int) / 1000.0
+                else:
+                    # 较短数字，除以100
+                    strike_price = float(strike_raw_int) / 100.0
+                
+                result['strike_price'] = strike_price
+                logger.debug(f"V2解析美股期权行权价格: {strike_raw} -> {strike_price} (股票: {stock_symbol})")
+            except ValueError:
+                logger.error(f"V2解析美股期权行权价格失败: {strike_raw}")
                 return result
             
             result['is_valid'] = True

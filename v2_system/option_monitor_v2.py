@@ -52,7 +52,7 @@ class V2OptionMonitor:
         self.notifier = V2Notifier()
         self.data_handler = V2DataHandler(market)
         self.mac_notifier = MacNotifier()
-        self.big_options_processor = BigOptionsProcessor()
+        self.big_options_processor = BigOptionsProcessor(market)
         self.quote_ctx = None
         self.is_running = False
         self.monitor_thread = None
@@ -241,10 +241,21 @@ class V2OptionMonitor:
                 self.logger.info("V2系统第一次扫描，加载历史数据进行diff比较")
                 self.load_previous_options()
             
+            # 根据市场选择对应的股票列表
+            if self.market == 'HK':
+                monitor_stocks = HK_MONITOR_STOCKS
+                self.logger.info(f"V2系统港股监控，股票列表: {monitor_stocks}")
+            elif self.market == 'US':
+                monitor_stocks = US_MONITOR_STOCKS
+                self.logger.info(f"V2系统美股监控，股票列表: {monitor_stocks}")
+            else:
+                self.logger.error(f"V2系统不支持的市场类型: {self.market}")
+                return []
+            
             # 获取大单期权
             big_options = self.big_options_processor.get_recent_big_options(
                 self.quote_ctx, 
-                MONITOR_STOCKS,
+                monitor_stocks,
                 option_monitor=self
             )
             

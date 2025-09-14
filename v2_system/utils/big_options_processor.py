@@ -51,12 +51,13 @@ def retry_on_api_error(max_retries: int = 3, *, delay: float = 5.0) -> Callable[
 class BigOptionsProcessor:
     """V2系统大单期权处理器"""
     
-    def __init__(self):
-        self.logger = logging.getLogger('V2OptionMonitor.BigOptionsProcessor')
+    def __init__(self, market: str = 'HK'):
+        self.market = market
+        self.logger = logging.getLogger(f'V2OptionMonitor.BigOptionsProcessor.{market}')
         
-        # 初始化数据库管理器
+        # 初始化数据库管理器，根据市场选择对应数据库
         from .database_manager import get_database_manager
-        self.db_manager = get_database_manager()
+        self.db_manager = get_database_manager(market)
         
         # 数据现在统一存储在数据库中，不再使用JSON文件
         self.stock_price_cache = {}  # 缓存股价信息
@@ -76,7 +77,7 @@ class BigOptionsProcessor:
         
         try:
             from .database_manager import get_database_manager
-            db_manager = get_database_manager()
+            db_manager = get_database_manager(self.market)
             
             # 从数据库获取当日所有期权的最新成交量
             self.today_option_volumes = db_manager.get_today_all_option_volumes()
@@ -981,72 +982,21 @@ class BigOptionsProcessor:
         """从期权代码统一解析所有信息
         
         Args:
-            option_code: 期权代码，格式如 HK.TCH250919C650000
+            option_code: 期权代码，格式如 HK.TCH250919C650000 或 US.AAPL250926C155000
             
         Returns:
             tuple: (strike_price, option_type, expiry_date)
         """
         try:
-            import re
-            # 统一正则表达式匹配期权代码格式: HK.XXX250919C650000
-            # 捕获组: 1=股票代码(TCH), 2=日期(250919), 3=类型(C/P), 4=行权价(650000)
-            pattern = r'HK\.([A-Z]{2,5})(\d{6})([CP])(\d+)$'
-            match = re.search(pattern, option_code)
+            # 使用统一的期权代码解析器
+            from .option_code_parser import option_parser
             
-            if match:
-                stock_symbol = match.group(1)  # TCH
-                date_str = match.group(2)      # 250919
-                option_type_char = match.group(3)  # C或P
-                strike_str = match.group(4)    # 650000
-                
-                # 解析到期日: 250919 -> 2025-09-19
-                try:
-                    year = int('20' + date_str[:2])
-                    month = int(date_str[2:4])
-                    day = int(date_str[4:6])
-                    from datetime import datetime
-                    dt = datetime(year, month, day)
-                    expiry_date = dt.strftime('%Y-%m-%d')
-                except ValueError:
-                    expiry_date = ''
-                
-                # 解析期权类型
-                option_type = 'Call' if option_type_char == 'C' else 'Put'
-                
-                # 解析行权价（智能判断除数）
-                price_int = int(strike_str)
-                
-                # 根据股票简称和价格范围智能判断除数
-                high_price_stocks = ['TCH', 'HEX', 'MEI', 'JDC', 'ALI']  # 腾讯、港交所、美团、京东、阿里等
-                mid_price_stocks = ['MIU', 'KUA', 'ZMI']  # 小米、快手等
-                
-                if stock_symbol in high_price_stocks:
-                    # 高价股：通常6位数除以1000，5位数除以100
-                    if len(strike_str) >= 6:
-                        strike_price = float(price_int) / 1000.0
-                    else:
-                        strike_price = float(price_int) / 100.0
-                elif stock_symbol in mid_price_stocks:
-                    # 中价股：6位数可能除以10000，5位数除以1000
-                    if len(strike_str) >= 6:
-                        strike_price = float(price_int) / 10000.0
-                    else:
-                        strike_price = float(price_int) / 1000.0
-                else:
-                    # 未知股票，根据数值大小智能判断
-                    if len(strike_str) >= 6:
-                        if price_int >= 500000:  # 大于50万，可能是高价股
-                            strike_price = float(price_int) / 1000.0
-                        else:  # 小于50万，可能是低价股
-                            strike_price = float(price_int) / 10000.0
-                    elif len(strike_str) >= 5:
-                        if price_int >= 50000:  # 大于5万，除以1000
-                            strike_price = float(price_int) / 1000.0
-                        else:  # 小于5万，除以100
-                            strike_price = float(price_int) / 100.0
-                    else:
-                        # 较短数字，除以100
-                        strike_price = float(price_int) / 100.0
+            result = option_parser.parse_option_code(option_code)
+            
+            if result['is_valid']:
+                strike_price = result['strike_price']
+                option_type = result['option_type']
+                expiry_date = result['expiry_date']
                 
                 self.logger.debug(f"V2统一解析期权代码: {option_code} -> 执行价:{strike_price}, 类型:{option_type}, 到期:{expiry_date}")
                 return strike_price, option_type, expiry_date

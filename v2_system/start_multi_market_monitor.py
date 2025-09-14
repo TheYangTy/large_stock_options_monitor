@@ -24,6 +24,8 @@ from config import (
     is_hk_trading_time,
     is_us_trading_time,
     get_market_type,
+    should_monitor_market,
+    should_update_data_off_hours,
     FUTU_CONFIG
 )
 
@@ -59,20 +61,23 @@ class MultiMarketMonitor:
         try:
             self.logger.info("🇭🇰 启动港股期权监控线程")
             self.hk_monitor = V2OptionMonitor(market='HK')
-            self.hk_monitor.stock_codes = STOCK_CODES
-            self.hk_monitor.market_type = 'HK'
+            self.logger.info(f"📋 港股监控列表: {len(STOCK_CODES)} 只股票")
             
             while self.running:
                 try:
-                    if is_hk_trading_time():
-                        self.logger.info("✅ 港股交易时间，开始监控")
-                        self.hk_monitor.run_once()
-                    else:
-                        self.logger.info("⏰ 港股非交易时间，等待中...")
-                        time.sleep(300)  # 非交易时间等待5分钟
-                        continue
+                    is_trading = is_hk_trading_time()
+                    should_monitor = should_monitor_market('HK')
                     
-                    # 交易时间内每30秒检查一次
+                    if is_trading:
+                        self.logger.info("✅ 港股交易时间，正常监控并发送所有通知")
+                        self.hk_monitor.manual_scan()
+                    elif should_monitor:
+                        self.logger.info("⏰ 港股非交易时间，继续监控数据但不发送额外通知")
+                        self.hk_monitor.manual_scan()
+                    else:
+                        self.logger.info("🔒 港股非交易时间且调试开关已关闭，跳过数据更新")
+                    
+                    # 每30秒检查一次
                     time.sleep(30)
                     
                 except Exception as e:
@@ -87,20 +92,23 @@ class MultiMarketMonitor:
         try:
             self.logger.info("🇺🇸 启动美股期权监控线程")
             self.us_monitor = V2OptionMonitor(market='US')
-            self.us_monitor.stock_codes = US_STOCK_CODES
-            self.us_monitor.market_type = 'US'
+            self.logger.info(f"📋 美股监控列表: {len(US_STOCK_CODES)} 只股票")
             
             while self.running:
                 try:
-                    if is_us_trading_time():
-                        self.logger.info("✅ 美股交易时间，开始监控")
-                        self.us_monitor.run_once()
-                    else:
-                        self.logger.info("⏰ 美股非交易时间，等待中...")
-                        time.sleep(300)  # 非交易时间等待5分钟
-                        continue
+                    is_trading = is_us_trading_time()
+                    should_monitor = should_monitor_market('US')
                     
-                    # 交易时间内每30秒检查一次
+                    if is_trading:
+                        self.logger.info("✅ 美股交易时间，正常监控并发送所有通知")
+                        self.us_monitor.manual_scan()
+                    elif should_monitor:
+                        self.logger.info("⏰ 美股非交易时间，继续监控数据但不发送额外通知")
+                        self.us_monitor.manual_scan()
+                    else:
+                        self.logger.info("🔒 美股非交易时间且调试开关已关闭，跳过数据更新")
+                    
+                    # 每30秒检查一次
                     time.sleep(30)
                     
                 except Exception as e:

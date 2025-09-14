@@ -19,8 +19,8 @@ sys.path.append(current_dir)
 
 from option_monitor_v2 import V2OptionMonitor
 from config import (
-    STOCK_CODES, 
-    US_STOCK_CODES,
+    HK_MONITOR_STOCKS, 
+    US_MONITOR_STOCKS,
     is_hk_trading_time,
     is_us_trading_time,
     get_market_type,
@@ -55,30 +55,61 @@ class MultiMarketMonitor:
         self.hk_monitor = None
         self.us_monitor = None
         self.running = False
+        self.api_lock = threading.Lock()  # 添加API锁，防止并发请求
+        self.last_api_call = 0  # 上次API调用时间戳
+        self.min_api_interval = 5  # API调用最小间隔(秒)
         
+    def wait_for_api_availability(self):
+        """等待API可用（限流保护）"""
+        with self.api_lock:
+            now = time.time()
+            elapsed = now - self.last_api_call
+            
+            if elapsed < self.min_api_interval:
+                wait_time = self.min_api_interval - elapsed
+                self.logger.debug(f"API限流保护：等待{wait_time:.1f}秒")
+                time.sleep(wait_time)
+            
+            self.last_api_call = time.time()
+    
     def start_hk_monitor(self):
         """启动港股监控"""
         try:
             self.logger.info("🇭🇰 启动港股期权监控线程")
             self.hk_monitor = V2OptionMonitor(market='HK')
-            self.logger.info(f"📋 港股监控列表: {len(STOCK_CODES)} 只股票")
+            self.logger.info(f"📋 港股监控列表: {len(HK_MONITOR_STOCKS)} 只股票")
+            
+            # 港股线程先等待5秒，避免与美股线程同时启动
+            self.logger.info("港股监控线程等待5秒，错峰启动...")
+            time.sleep(5)
+            
+            # 监控循环中添加错峰机制
+            scan_interval = 120  # 基础扫描间隔(秒) - 2分钟
             
             while self.running:
                 try:
                     is_trading = is_hk_trading_time()
                     should_monitor = should_monitor_market('HK')
                     
-                    if is_trading:
-                        self.logger.info("✅ 港股交易时间，正常监控并发送所有通知")
-                        self.hk_monitor.manual_scan()
-                    elif should_monitor:
-                        self.logger.info("⏰ 港股非交易时间，继续监控数据但不发送额外通知")
-                        self.hk_monitor.manual_scan()
+                    if is_trading or should_monitor:
+                        self.logger.info("🇭🇰 港股监控开始扫描...")
+                        
+                        # 获取API锁，确保不与美股监控同时请求API
+                        self.wait_for_api_availability()
+                        
+                        if is_trading:
+                            self.logger.info("✅ 港股交易时间，正常监控并发送所有通知")
+                            self.hk_monitor.manual_scan()
+                        else:
+                            self.logger.info("⏰ 港股非交易时间，继续监控数据但不发送额外通知")
+                            self.hk_monitor.manual_scan()
                     else:
                         self.logger.info("🔒 港股非交易时间且调试开关已关闭，跳过数据更新")
                     
-                    # 每30秒检查一次
-                    time.sleep(30)
+                    # 添加随机延时(115-125秒)，避免与美股监控同步
+                    jitter = scan_interval + (hash(f"hk_{time.time()}") % 10)
+                    self.logger.info(f"港股监控等待{jitter}秒(约{jitter/60:.1f}分钟)后下次扫描")
+                    time.sleep(jitter)
                     
                 except Exception as e:
                     self.logger.error(f"❌ 港股监控异常: {e}")
@@ -92,24 +123,39 @@ class MultiMarketMonitor:
         try:
             self.logger.info("🇺🇸 启动美股期权监控线程")
             self.us_monitor = V2OptionMonitor(market='US')
-            self.logger.info(f"📋 美股监控列表: {len(US_STOCK_CODES)} 只股票")
+            self.logger.info(f"📋 美股监控列表: {len(US_MONITOR_STOCKS)} 只股票")
+            
+            # 美股线程先等待60秒，确保与港股错开1分钟
+            self.logger.info("美股监控线程等待60秒，错峰启动...")
+            time.sleep(60)
+            
+            # 监控循环中添加错峰机制
+            scan_interval = 120  # 基础扫描间隔(秒) - 2分钟
             
             while self.running:
                 try:
                     is_trading = is_us_trading_time()
                     should_monitor = should_monitor_market('US')
                     
-                    if is_trading:
-                        self.logger.info("✅ 美股交易时间，正常监控并发送所有通知")
-                        self.us_monitor.manual_scan()
-                    elif should_monitor:
-                        self.logger.info("⏰ 美股非交易时间，继续监控数据但不发送额外通知")
-                        self.us_monitor.manual_scan()
+                    if is_trading or should_monitor:
+                        self.logger.info("🇺🇸 美股监控开始扫描...")
+                        
+                        # 获取API锁，确保不与港股监控同时请求API
+                        self.wait_for_api_availability()
+                        
+                        if is_trading:
+                            self.logger.info("✅ 美股交易时间，正常监控并发送所有通知")
+                            self.us_monitor.manual_scan()
+                        else:
+                            self.logger.info("⏰ 美股非交易时间，继续监控数据但不发送额外通知")
+                            self.us_monitor.manual_scan()
                     else:
                         self.logger.info("🔒 美股非交易时间且调试开关已关闭，跳过数据更新")
                     
-                    # 每30秒检查一次
-                    time.sleep(30)
+                    # 添加随机延时(115-125秒)，避免与港股监控同步
+                    jitter = scan_interval + (hash(f"us_{time.time()}") % 10)
+                    self.logger.info(f"美股监控等待{jitter}秒(约{jitter/60:.1f}分钟)后下次扫描")
+                    time.sleep(jitter)
                     
                 except Exception as e:
                     self.logger.error(f"❌ 美股监控异常: {e}")
@@ -130,8 +176,14 @@ class MultiMarketMonitor:
         hk_thread.daemon = True
         us_thread.daemon = True
         
-        # 启动线程
+        # 启动线程 - 先启动港股，再启动美股，确保错峰
+        self.logger.info("🚀 启动港股监控线程...")
         hk_thread.start()
+        
+        self.logger.info("⏱️ 等待60秒(1分钟)后启动美股监控线程...")
+        time.sleep(60)
+        
+        self.logger.info("🚀 启动美股监控线程...")
         us_thread.start()
         
         self.logger.info("🚀 多市场期权监控已启动")
@@ -171,16 +223,18 @@ def main():
     """主函数"""
     logger = setup_logging()
     logger.info("🌍 多市场期权监控系统启动")
+    logger.info("⚠️ 多市场模式已启用错峰请求机制，避免API并发失败")
+    logger.info("⏱️ 单一市场轮询间隔: 2分钟，市场间间隔: 1分钟")
     
     try:
         # 显示监控配置
         logger.info("📊 监控配置:")
-        logger.info(f"  🇭🇰 港股: {len(STOCK_CODES)} 只股票")
-        for stock_code in STOCK_CODES:
+        logger.info(f"  🇭🇰 港股: {len(HK_MONITOR_STOCKS)} 只股票")
+        for stock_code in HK_MONITOR_STOCKS:
             logger.info(f"    - {stock_code}")
         
-        logger.info(f"  🇺🇸 美股: {len(US_STOCK_CODES)} 只股票")
-        for stock_code in US_STOCK_CODES:
+        logger.info(f"  🇺🇸 美股: {len(US_MONITOR_STOCKS)} 只股票")
+        for stock_code in US_MONITOR_STOCKS:
             logger.info(f"    - {stock_code}")
         
         # 检查当前交易时间

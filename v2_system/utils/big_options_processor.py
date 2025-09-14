@@ -17,7 +17,7 @@ import sys
 
 # 添加V2系统路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import BIG_TRADE_CONFIG, HK_TRADING_HOURS, US_TRADING_HOURS_DST, US_TRADING_HOURS_STD, OPTION_FILTERS, SYSTEM_CONFIG
+from config import BIG_TRADE_CONFIG, HK_TRADING_HOURS, US_TRADING_HOURS_DST, US_TRADING_HOURS_STD, OPTION_FILTERS, SYSTEM_CONFIG, get_stock_name
 import futu as ft
 
 
@@ -412,13 +412,25 @@ class BigOptionsProcessor:
                 for stock_code in stocks_to_update:
                     if stock_code in self.stock_price_cache:
                         result[stock_code] = self.stock_price_cache[stock_code]
+                    else:
+                        # 使用默认价格和config.py中的get_stock_name函数获取股票名称
+                        default_price = 100.0
+                        stock_name = get_stock_name(stock_code)
+                        result[stock_code] = {'price': default_price, 'name': stock_name}
+                        self.logger.debug(f"V2API调用失败时使用get_stock_name获取股票名称: {stock_code} = {stock_name}")
         
         except Exception as e:
             self.logger.error(f"V2批量获取股票信息异常: {e}")
             # 使用缓存中的旧数据
             for stock_code in stocks_to_update:
-                if stock_code in self.stock_price_cache:
-                    result[stock_code] = self.stock_price_cache[stock_code]
+                    if stock_code in self.stock_price_cache:
+                        result[stock_code] = self.stock_price_cache[stock_code]
+                    else:
+                        # 使用默认价格和config.py中的get_stock_name函数获取股票名称
+                        default_price = 100.0
+                        stock_name = get_stock_name(stock_code)
+                        result[stock_code] = {'price': default_price, 'name': stock_name}
+                        self.logger.debug(f"V2API调用失败时使用get_stock_name获取股票名称: {stock_code} = {stock_name}")
         
         return result
     
@@ -514,8 +526,27 @@ class BigOptionsProcessor:
             else:
                 # 使用默认股票信息
                 default_stocks = {
+                    # 港股
                     'HK.00700': {'price': 600.0, 'name': '腾讯控股'},
                     'HK.09988': {'price': 80.0, 'name': '阿里巴巴-SW'},
+                    'HK.03690': {'price': 120.0, 'name': '美团-W'},
+                    'HK.01810': {'price': 12.0, 'name': '小米集团-W'},
+                    'HK.09618': {'price': 120.0, 'name': '京东集团-SW'},
+                    'HK.02318': {'price': 40.0, 'name': '中国平安'},
+                    'HK.00388': {'price': 300.0, 'name': '香港交易所'},
+                    
+                    # 美股
+                    'US.AAPL': {'price': 150.0, 'name': '苹果'},
+                    'US.MSFT': {'price': 300.0, 'name': '微软'},
+                    'US.GOOGL': {'price': 120.0, 'name': '谷歌'},
+                    'US.AMZN': {'price': 130.0, 'name': '亚马逊'},
+                    'US.TSLA': {'price': 250.0, 'name': '特斯拉'},
+                    'US.META': {'price': 280.0, 'name': 'Meta'},
+                    'US.NVDA': {'price': 400.0, 'name': '英伟达'},
+                    'US.NFLX': {'price': 400.0, 'name': '奈飞'},
+                    'US.AMD': {'price': 120.0, 'name': 'AMD'},
+                    'US.CRM': {'price': 200.0, 'name': 'Salesforce'}
+                },
                     'HK.03690': {'price': 120.0, 'name': '美团-W'},
                     'HK.01810': {'price': 12.0, 'name': '小米集团-W'},
                     'HK.09618': {'price': 120.0, 'name': '京东集团-SW'},
@@ -540,8 +571,27 @@ class BigOptionsProcessor:
             
             # 使用默认股票信息
             default_stocks = {
-                'HK.00700': {'price': 600.0, 'name': '腾讯控股'},
-                'HK.09988': {'price': 134.4, 'name': '阿里巴巴-SW'},
+                    # 港股
+                    'HK.00700': {'price': 600.0, 'name': '腾讯控股'},
+                    'HK.09988': {'price': 80.0, 'name': '阿里巴巴-SW'},
+                    'HK.03690': {'price': 120.0, 'name': '美团-W'},
+                    'HK.01810': {'price': 12.0, 'name': '小米集团-W'},
+                    'HK.09618': {'price': 120.0, 'name': '京东集团-SW'},
+                    'HK.02318': {'price': 40.0, 'name': '中国平安'},
+                    'HK.00388': {'price': 300.0, 'name': '香港交易所'},
+                    
+                    # 美股
+                    'US.AAPL': {'price': 150.0, 'name': '苹果'},
+                    'US.MSFT': {'price': 300.0, 'name': '微软'},
+                    'US.GOOGL': {'price': 120.0, 'name': '谷歌'},
+                    'US.AMZN': {'price': 130.0, 'name': '亚马逊'},
+                    'US.TSLA': {'price': 250.0, 'name': '特斯拉'},
+                    'US.META': {'price': 280.0, 'name': 'Meta'},
+                    'US.NVDA': {'price': 400.0, 'name': '英伟达'},
+                    'US.NFLX': {'price': 400.0, 'name': '奈飞'},
+                    'US.AMD': {'price': 120.0, 'name': 'AMD'},
+                    'US.CRM': {'price': 200.0, 'name': 'Salesforce'}
+                },
                 'HK.03690': {'price': 120.0, 'name': '美团-W'},
                 'HK.01810': {'price': 12.0, 'name': '小米集团-W'},
                 'HK.09618': {'price': 120.0, 'name': '京东集团-SW'},
@@ -781,11 +831,8 @@ class BigOptionsProcessor:
                         stock_name = file_info.get('name', '') or stock_code
                     else:
                         # 默认价格和名称
-                        stock_names = {
-                            'HK.00700': '腾讯控股', 'HK.09988': '阿里巴巴-SW', 'HK.03690': '美团-W',
-                            'HK.01810': '小米集团-W', 'HK.09618': '京东集团-SW', 'HK.02318': '中国平安',
-                            'HK.00388': '香港交易所', 'HK.00981': '中芯国际', 'HK.01024': '快手-W'
-                        }
+                        # 使用config.py中的get_stock_name函数获取股票名称
+                        stock_name = get_stock_name(stock_code)
                         stock_name = stock_names.get(stock_code, stock_code)
                         
                         default_prices = {

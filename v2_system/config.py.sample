@@ -46,8 +46,7 @@ US_DATABASE_CONFIG = {
     'connection_timeout': 30,
 }
 
-# 向后兼容的数据库配置（默认使用港股）
-DATABASE_CONFIG = HK_DATABASE_CONFIG
+
 
 def get_database_config(market: str = 'HK') -> Dict[str, Any]:
     """根据市场获取数据库配置"""
@@ -85,8 +84,7 @@ US_MONITOR_STOCKS = [
     'US.CRM',    # Salesforce
 ]
 
-# 合并所有监控股票（向后兼容）
-MONITOR_STOCKS = HK_MONITOR_STOCKS + US_MONITOR_STOCKS
+
 
 # ==================== 期权过滤配置 ====================
 OPTION_FILTERS = {
@@ -116,18 +114,7 @@ OPTION_FILTERS = {
         'min_importance_score': 60, # 最小重要性分数
     },
     
-    # 向后兼容
-    'default': {
-        'min_volume': 10,           # 最小成交量
-        'min_turnover': 200000,      # 最小成交额(港币)
-        'min_price': 0.001,         # 最小期权价格
-        'max_price': 30,          # 最大期权价格
-        'min_days_to_expiry': 1,    # 最小到期天数
-        'max_days_to_expiry': 365,  # 最大到期天数
-        'enable_call': True,        # 监控看涨期权
-        'enable_put': True,         # 监控看跌期权
-        'min_importance_score': 60, # 最小重要性分数
-    },
+
     
     # 港股特定股票配置
     'HK.00700': {  # 腾讯控股
@@ -247,8 +234,7 @@ US_TRADING_HOURS_STD = {
     'update_data_off_hours': True,  # 非开市时间是否更新数据 (调试开关)
 }
 
-# 向后兼容
-TRADING_HOURS = HK_TRADING_HOURS
+
 
 # ==================== 系统配置 ====================
 SYSTEM_CONFIG = {
@@ -325,7 +311,16 @@ def get_market_type(stock_code: str) -> str:
 
 def get_option_filter(stock_code: str) -> Dict[str, Any]:
     """获取股票的期权过滤配置"""
-    default_filter = OPTION_FILTERS['default'].copy()
+    # 根据市场获取默认过滤器
+    if stock_code.startswith('HK.'):
+        default_filter = OPTION_FILTERS['hk_default'].copy()
+    elif stock_code.startswith('US.'):
+        default_filter = OPTION_FILTERS['us_default'].copy()
+    else:
+        # 如果无法确定市场，使用港股默认配置
+        default_filter = OPTION_FILTERS['hk_default'].copy()
+    
+    # 合并特定股票的配置
     stock_filter = OPTION_FILTERS.get(stock_code, {})
     default_filter.update(stock_filter)
     return default_filter
@@ -381,7 +376,8 @@ def get_option_filter_by_market(stock_code: str) -> Dict[str, Any]:
         elif market == 'US':
             base_filter = OPTION_FILTERS['us_default'].copy()
         else:
-            base_filter = OPTION_FILTERS['default'].copy()
+            # 如果无法确定市场，使用港股默认配置
+            base_filter = OPTION_FILTERS['hk_default'].copy()
         
         # 合并配置
         base_filter.update(specific_filter)
@@ -393,7 +389,8 @@ def get_option_filter_by_market(stock_code: str) -> Dict[str, Any]:
     elif market == 'US':
         return OPTION_FILTERS['us_default'].copy()
     else:
-        return OPTION_FILTERS['default'].copy()
+        # 如果无法确定市场，使用港股默认配置
+        return OPTION_FILTERS['hk_default'].copy()
 
 def is_us_dst() -> bool:
     """判断当前是否为美国夏令时"""
@@ -555,7 +552,7 @@ def validate_config():
         errors.append("富途API端口配置无效")
     
     # 验证监控股票
-    if not MONITOR_STOCKS:
+    if not HK_MONITOR_STOCKS and not US_MONITOR_STOCKS:
         errors.append("未配置监控股票")
     
     # 验证通知配置
@@ -571,7 +568,8 @@ def validate_config():
     
     # 创建必要的目录
     for dir_path in [
-        os.path.dirname(DATABASE_CONFIG['db_path']),
+        os.path.dirname(HK_DATABASE_CONFIG['db_path']),
+        os.path.dirname(US_DATABASE_CONFIG['db_path']),
         os.path.dirname(SYSTEM_CONFIG['log_file']),
         SYSTEM_CONFIG['cache_dir']
     ]:
@@ -613,12 +611,7 @@ def load_from_env():
 # 自动加载环境变量
 load_from_env()
 
-# 兼容性别名
-MONITOR_STOCK_CODES = MONITOR_STOCKS
-STOCK_CODES = HK_MONITOR_STOCKS  # 港股代码别名
-US_STOCK_CODES = US_MONITOR_STOCKS  # 美股代码别名
-OPTION_FILTER = OPTION_FILTERS['default']
-MONITOR_TIME = TRADING_HOURS
+
 
 if __name__ == '__main__':
     # 配置验证
@@ -632,9 +625,11 @@ if __name__ == '__main__':
         
     # 显示配置摘要
     print(f"\nV2系统配置摘要:")
-    print(f"  监控股票: {len(MONITOR_STOCKS)} 只")
+    print(f"  港股监控: {len(HK_MONITOR_STOCKS)} 只")
+    print(f"  美股监控: {len(US_MONITOR_STOCKS)} 只")
     print(f"  富途API: {FUTU_CONFIG['host']}:{FUTU_CONFIG['port']}")
-    print(f"  数据库: {DATABASE_CONFIG['db_path']}")
+    print(f"  港股数据库: {HK_DATABASE_CONFIG['db_path']}")
+    print(f"  美股数据库: {US_DATABASE_CONFIG['db_path']}")
     print(f"  Web端口: {SYSTEM_CONFIG['web_port']}")
     print(f"  缓存目录: {SYSTEM_CONFIG['cache_dir']}")
     print(f"  大单监控: {'启用' if BIG_TRADE_CONFIG['enable'] else '禁用'}")

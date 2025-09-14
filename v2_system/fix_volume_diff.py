@@ -17,7 +17,7 @@ from typing import Dict, List, Tuple
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
-from config import DATABASE_CONFIG
+from config import HK_DATABASE_CONFIG, US_DATABASE_CONFIG, get_stock_name
 from utils.logger import setup_logger
 
 
@@ -27,11 +27,8 @@ class MultiMarketVolumeFixProcessor:
     def __init__(self):
         self.logger = setup_logger('MultiMarketVolumeFixProcessor')
         # 获取两个市场的数据库路径
-        base_path = DATABASE_CONFIG['db_path']  # data/hk_options_monitor_v2.db
-        data_dir = os.path.dirname(base_path)
-        
-        self.hk_db_path = os.path.join(data_dir, 'hk_options_monitor_v2.db')
-        self.us_db_path = os.path.join(data_dir, 'us_options_monitor_v2.db')
+        self.hk_db_path = HK_DATABASE_CONFIG['db_path']
+        self.us_db_path = US_DATABASE_CONFIG['db_path']
         
         self.logger.info(f"HK数据库路径: {self.hk_db_path}")
         self.logger.info(f"US数据库路径: {self.us_db_path}")
@@ -281,8 +278,23 @@ class MultiMarketVolumeFixProcessor:
             # 获取股票名称映射
             stock_names = self.get_stock_names_from_stock_info(db_path, market)
             if not stock_names:
-                self.logger.warning(f"{market}数据库没有找到股票名称数据")
-                return False
+                self.logger.warning(f"{market}数据库没有找到股票名称数据，将使用配置文件中的股票名称")
+                # 使用配置文件中的股票名称
+                with sqlite3.connect(db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT DISTINCT stock_code FROM option_trades WHERE stock_name IS NULL OR stock_name = '' OR stock_name = '-'")
+                    stock_codes = [row[0] for row in cursor.fetchall()]
+                    
+                    for stock_code in stock_codes:
+                        stock_name = get_stock_name(stock_code)
+                        if stock_name != stock_code:  # 如果找到了名称（不等于代码本身）
+                            stock_names[stock_code] = stock_name
+                
+                if not stock_names:
+                    self.logger.warning(f"配置文件中也没有找到{market}市场的股票名称")
+                    return False
+                else:
+                    self.logger.info(f"从配置文件中获取到 {len(stock_names)} 个股票名称")
             
             # 查找需要更新的记录
             with sqlite3.connect(db_path) as conn:

@@ -113,6 +113,12 @@ class V2DatabaseManager:
     def save_option_trade(self, trade_data: Dict[str, Any]) -> bool:
         """保存单个期权交易记录"""
         try:
+            # 过滤成交量为0的期权，减少磁盘消耗
+            volume = trade_data.get('volume', 0)
+            if volume <= 0:
+                self.logger.debug(f"V2跳过保存成交量为0的期权: {trade_data.get('option_code')}")
+                return True  # 返回True表示处理成功，只是跳过了保存
+            
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
@@ -161,11 +167,22 @@ class V2DatabaseManager:
     def save_option_trades_batch(self, trades_data: List[Dict[str, Any]]) -> bool:
         """批量保存期权交易记录"""
         try:
+            # 过滤成交量为0的期权，减少磁盘消耗
+            filtered_trades = [trade for trade in trades_data if trade.get('volume', 0) > 0]
+            
+            if len(filtered_trades) != len(trades_data):
+                skipped_count = len(trades_data) - len(filtered_trades)
+                self.logger.info(f"V2批量保存时跳过{skipped_count}个成交量为0的期权")
+            
+            if not filtered_trades:
+                self.logger.debug("V2批量保存：所有期权成交量都为0，跳过保存")
+                return True
+            
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
                 records = []
-                for trade_data in trades_data:
+                for trade_data in filtered_trades:
                     # 提取交易日期
                     timestamp = trade_data.get('timestamp', datetime.now().isoformat())
                     if isinstance(timestamp, str):

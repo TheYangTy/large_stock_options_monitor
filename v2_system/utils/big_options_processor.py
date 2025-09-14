@@ -909,9 +909,12 @@ class BigOptionsProcessor:
                     
                     trade_info['direction'] = direction
                     
-                    # 🔥 关键修改：所有期权数据都保存到数据库
-                    self._save_to_database(trade_info)
-                    self.logger.debug(f"V2期权数据已保存: {option_code} (成交量:{current_volume}, 成交额:{current_turnover:.0f})")
+                    # 🔥 关键修改：只保存成交量大于0的期权数据到数据库，减少磁盘消耗
+                    if current_volume > 0:
+                        self._save_to_database(trade_info)
+                        self.logger.debug(f"V2期权数据已保存: {option_code} (成交量:{current_volume}, 成交额:{current_turnover:.0f})")
+                    else:
+                        self.logger.debug(f"V2跳过成交量为0的期权: {option_code}")
                     
                     # 🔥 关键修改：检查是否满足大单条件，满足条件的才加入返回列表（用于通知）
                     is_big_trade = (

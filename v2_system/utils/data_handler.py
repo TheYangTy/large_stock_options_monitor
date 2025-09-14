@@ -116,12 +116,23 @@ class V2DataHandler:
             if not option_data:
                 return True
             
+            # 过滤成交量为0的期权，减少磁盘消耗
+            filtered_options = [option for option in option_data if option.get('volume', 0) > 0]
+            
+            if len(filtered_options) != len(option_data):
+                skipped_count = len(option_data) - len(filtered_options)
+                self.logger.info(f"V2跳过{skipped_count}个成交量为0的期权，减少磁盘消耗")
+            
+            if not filtered_options:
+                self.logger.info("V2所有期权成交量都为0，跳过数据库保存")
+                return True
+            
             success_count = 0
-            for option in option_data:
+            for option in filtered_options:
                 if self.db_manager.save_option_trade(option):
                     success_count += 1
             
-            self.logger.info(f"V2期权数据已保存到数据库: {success_count}/{len(option_data)}条记录")
+            self.logger.info(f"V2期权数据已保存到数据库: {success_count}/{len(filtered_options)}条记录")
             return success_count > 0
             
         except Exception as e:

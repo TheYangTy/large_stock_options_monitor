@@ -308,21 +308,16 @@ class BigOptionsProcessor:
         # 检查通知冷却时间
         if option_code in self.notification_history:
             last_notify_time = self.notification_history[option_code]
-            if (current_time - last_notify_time).seconds < BIG_TRADE_CONFIG['notification_cooldown']:
+            time_diff = (current_time - last_notify_time).total_seconds()
+            if time_diff < BIG_TRADE_CONFIG['notification_cooldown']:
+                self.logger.debug(f"V2期权 {option_code} 在冷却期内，距离上次通知 {time_diff:.0f}秒")
                 return False
         
-        # 检查是否满足大单条件
-        volume = trade_info.get('volume', 0)
-        turnover = trade_info.get('turnover', 0)
-        
-        if (volume >= BIG_TRADE_CONFIG['min_volume_threshold'] and 
-            turnover >= BIG_TRADE_CONFIG['min_turnover_threshold']):
-            
-            # 更新通知历史
-            self.notification_history[option_code] = current_time
-            return True
-        
-        return False
+        # 🔥 修复：传入的trade_info已经是满足大单条件的，不需要重复检查
+        # 直接更新通知历史并返回True
+        self.notification_history[option_code] = current_time
+        self.logger.debug(f"V2期权 {option_code} 通过通知检查，更新通知历史")
+        return True
     
     @retry_on_api_error(max_retries=3)
     def _batch_get_stock_prices(self, quote_ctx, stock_codes: List[str], option_monitor=None) -> Dict[str, Dict[str, Any]]:
@@ -926,6 +921,11 @@ class BigOptionsProcessor:
                     previous_volume = option_previous_volumes.get(option_code, 0)
                     volume_diff = current_volume - previous_volume
                     
+                    # 🔥 修复：只有当成交量真正有变化时才保存和检测大单
+                    if volume_diff <= 0:
+                        self.logger.debug(f"V2跳过无变化期权: {option_code} (成交量:{current_volume}, diff:{volume_diff})")
+                        continue
+                    
                     # 更新当日成交量缓存
                     self._update_today_volume_cache(option_code, current_volume)
                     
@@ -953,15 +953,15 @@ class BigOptionsProcessor:
                         'direction': 'Unknown'  # 批量模式下暂不获取方向信息
                     }
                     
-                    # 保存到数据库（已经过滤了成交量为0的期权）
+                    # 保存到数据库（只保存有变化的期权）
                     self._save_to_database(trade_info)
-                    self.logger.debug(f"V2期权数据已保存: {option_code} (成交量:{current_volume}, 成交额:{current_turnover:.0f})")
+                    self.logger.debug(f"V2期权数据已保存: {option_code} (成交量:{current_volume}, diff:{volume_diff}, 成交额:{current_turnover:.0f})")
                     
                     # 检查是否满足大单条件
                     is_big_trade = (
                         current_volume >= BIG_TRADE_CONFIG['min_volume_threshold'] and 
                         current_turnover >= BIG_TRADE_CONFIG['min_turnover_threshold'] and
-                        volume_diff > 0  # 成交量有增长
+                        volume_diff > 0  # 成交量有增长（这个条件现在总是True，因为上面已经过滤了）
                     )
                     
                     if is_big_trade:

@@ -264,16 +264,30 @@ class V2DatabaseManager:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # 获取小于当前成交量的最大成交量记录
+                # 🔥 修复：获取该期权当日最新的一条记录成交量
+                # 如果当前成交量与最新记录相同，说明没有变化，返回当前成交量
+                # 如果不同，返回最新记录的成交量用于计算diff
                 cursor.execute('''
                     SELECT volume FROM option_trades 
-                    WHERE option_code = ? AND trade_date = ? AND volume < ?
-                    ORDER BY volume DESC, timestamp DESC
+                    WHERE option_code = ? AND trade_date = ?
+                    ORDER BY timestamp DESC
                     LIMIT 1
-                ''', (option_code, trade_date, current_volume))
+                ''', (option_code, trade_date))
                 
                 result = cursor.fetchone()
-                return result[0] if result else 0
+                if result:
+                    last_volume = result[0]
+                    # 如果当前成交量与最新记录相同，说明没有新的交易
+                    if current_volume == last_volume:
+                        self.logger.debug(f"V2期权{option_code}成交量无变化: {current_volume}")
+                        return current_volume  # 返回相同值，diff为0
+                    else:
+                        self.logger.debug(f"V2期权{option_code}成交量变化: {last_volume} -> {current_volume}")
+                        return last_volume
+                else:
+                    # 没有历史记录，这是第一次记录
+                    self.logger.debug(f"V2期权{option_code}首次记录成交量: {current_volume}")
+                    return 0
                 
         except Exception as e:
             self.logger.debug(f"V2获取期权{option_code}上一条记录成交量失败: {e}")
@@ -324,16 +338,25 @@ class V2DatabaseManager:
                 cursor = conn.cursor()
                 
                 for option_code, current_volume in current_volumes.items():
-                    # 获取小于当前成交量的最大成交量记录
+                    # 🔥 修复：获取该期权当日最新的一条记录成交量
                     cursor.execute('''
                         SELECT volume FROM option_trades 
-                        WHERE option_code = ? AND trade_date = ? AND volume < ?
-                        ORDER BY volume DESC, timestamp DESC
+                        WHERE option_code = ? AND trade_date = ?
+                        ORDER BY timestamp DESC
                         LIMIT 1
-                    ''', (option_code, trade_date, current_volume))
+                    ''', (option_code, trade_date))
                     
                     row = cursor.fetchone()
-                    result[option_code] = row[0] if row else 0
+                    if row:
+                        last_volume = row[0]
+                        # 如果当前成交量与最新记录相同，说明没有新的交易
+                        if current_volume == last_volume:
+                            result[option_code] = current_volume  # 返回相同值，diff为0
+                        else:
+                            result[option_code] = last_volume
+                    else:
+                        # 没有历史记录，这是第一次记录
+                        result[option_code] = 0
                 
                 return result
                 

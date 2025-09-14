@@ -160,9 +160,6 @@ BIG_TRADE_CONFIG = {
     'enable': True,
     'min_volume_threshold': 50,      # 最小成交量阈值
     'min_turnover_threshold': 100000, # 最小成交额阈值(港币)
-    'volume_spike_ratio': 3.0,       # 成交量激增倍数
-    'price_change_threshold': 0.05,   # 价格变化阈值(5%)
-    'time_window': 300,              # 时间窗口(秒)
     'notification_cooldown': 300,     # 通知冷却时间(秒)
 }
 
@@ -309,22 +306,6 @@ def get_market_type(stock_code: str) -> str:
         # 默认返回港股
         return 'HK'
 
-def get_option_filter(stock_code: str) -> Dict[str, Any]:
-    """获取股票的期权过滤配置"""
-    # 根据市场获取默认过滤器
-    if stock_code.startswith('HK.'):
-        default_filter = OPTION_FILTERS['hk_default'].copy()
-    elif stock_code.startswith('US.'):
-        default_filter = OPTION_FILTERS['us_default'].copy()
-    else:
-        # 如果无法确定市场，使用港股默认配置
-        default_filter = OPTION_FILTERS['hk_default'].copy()
-    
-    # 合并特定股票的配置
-    stock_filter = OPTION_FILTERS.get(stock_code, {})
-    default_filter.update(stock_filter)
-    return default_filter
-
 def get_stock_name(stock_code: str) -> str:
     """获取股票名称"""
     stock_names = {
@@ -362,35 +343,6 @@ def get_market_from_code(stock_code: str) -> str:
         return 'US'
     else:
         return 'UNKNOWN'
-
-def get_option_filter_by_market(stock_code: str) -> Dict[str, Any]:
-    """根据市场获取期权过滤配置"""
-    market = get_market_from_code(stock_code)
-    
-    # 先尝试获取特定股票的配置
-    if stock_code in OPTION_FILTERS:
-        specific_filter = OPTION_FILTERS[stock_code].copy()
-        # 获取市场默认配置作为基础
-        if market == 'HK':
-            base_filter = OPTION_FILTERS['hk_default'].copy()
-        elif market == 'US':
-            base_filter = OPTION_FILTERS['us_default'].copy()
-        else:
-            # 如果无法确定市场，使用港股默认配置
-            base_filter = OPTION_FILTERS['hk_default'].copy()
-        
-        # 合并配置
-        base_filter.update(specific_filter)
-        return base_filter
-    
-    # 使用市场默认配置
-    if market == 'HK':
-        return OPTION_FILTERS['hk_default'].copy()
-    elif market == 'US':
-        return OPTION_FILTERS['us_default'].copy()
-    else:
-        # 如果无法确定市场，使用港股默认配置
-        return OPTION_FILTERS['hk_default'].copy()
 
 def is_us_dst() -> bool:
     """判断当前是否为美国夏令时"""

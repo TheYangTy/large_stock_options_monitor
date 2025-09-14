@@ -534,6 +534,11 @@ class BigOptionsProcessor:
                     'HK.09618': {'price': 120.0, 'name': '京东集团-SW'},
                     'HK.02318': {'price': 40.0, 'name': '中国平安'},
                     'HK.00388': {'price': 300.0, 'name': '香港交易所'},
+                    'HK.03690': {'price': 120.0, 'name': '美团-W'},
+                    'HK.01810': {'price': 12.0, 'name': '小米集团-W'},
+                    'HK.09618': {'price': 120.0, 'name': '京东集团-SW'},
+                    'HK.02318': {'price': 40.0, 'name': '中国平安'},
+                    'HK.00388': {'price': 300.0, 'name': '香港交易所'},
                     
                     # 美股
                     'US.AAPL': {'price': 150.0, 'name': '苹果'},
@@ -547,12 +552,6 @@ class BigOptionsProcessor:
                     'US.AMD': {'price': 120.0, 'name': 'AMD'},
                     'US.CRM': {'price': 200.0, 'name': 'Salesforce'}
                 },
-                    'HK.03690': {'price': 120.0, 'name': '美团-W'},
-                    'HK.01810': {'price': 12.0, 'name': '小米集团-W'},
-                    'HK.09618': {'price': 120.0, 'name': '京东集团-SW'},
-                    'HK.02318': {'price': 40.0, 'name': '中国平安'},
-                    'HK.00388': {'price': 300.0, 'name': '香港交易所'},
-                }
                 
                 if stock_code in default_stocks:
                     stock_info = default_stocks[stock_code]

@@ -108,7 +108,7 @@ class BigOptionsProcessor:
         """保存期权交易数据到SQL数据库"""
         try:
             from .database_manager import get_database_manager
-            db_manager = get_database_manager()
+            db_manager = get_database_manager(self.market)
             
             # 保存到数据库
             success = db_manager.save_option_trade(trade_info)
@@ -257,7 +257,7 @@ class BigOptionsProcessor:
                     # 保存股票信息到数据库
                     try:
                         from .database_manager import get_database_manager
-                        db_manager = get_database_manager()
+                        db_manager = get_database_manager(self.market)
                         db_manager.save_stock_info(
                             stock_code=stock_code,
                             stock_name=stock_info.get('name', ''),
@@ -396,7 +396,7 @@ class BigOptionsProcessor:
                     # 保存股票信息到数据库
                     try:
                         from .database_manager import get_database_manager
-                        db_manager = get_database_manager()
+                        db_manager = get_database_manager(self.market)
                         db_manager.save_stock_info(
                             stock_code=code,
                             stock_name=name,
@@ -495,7 +495,7 @@ class BigOptionsProcessor:
                 # 保存股票信息到数据库
                 try:
                     from .database_manager import get_database_manager
-                    db_manager = get_database_manager()
+                    db_manager = get_database_manager(self.market)
                     db_manager.save_stock_info(
                         stock_code=stock_code,
                         stock_name=name,
@@ -603,7 +603,11 @@ class BigOptionsProcessor:
                         self.logger.info(f"V2 {stock_code}当前股价(使用默认价格): {current_price}")
                 
                 # 基于股价设定期权执行价格过滤范围
-                price_range = OPTION_FILTERS['default'].get('price_range', 0.2)
+                # 根据市场类型选择对应的过滤器
+                if market_type == 'US':
+                    price_range = OPTION_FILTERS['us_default'].get('price_range', 0.2)
+                else:
+                    price_range = OPTION_FILTERS['hk_default'].get('price_range', 0.2)
                 price_lower = current_price * (1 - price_range)
                 price_upper = current_price * (1 + price_range)
                 self.logger.info(f"V2筛选价格范围: {price_lower:.2f} - {price_upper:.2f} (±{price_range*100}%)")

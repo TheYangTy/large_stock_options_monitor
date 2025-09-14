@@ -11,7 +11,7 @@ import time
 import logging
 import threading
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 # 添加项目路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -55,35 +55,113 @@ class MultiMarketMonitor:
         self.hk_monitor = None
         self.us_monitor = None
         self.running = False
-        self.api_lock = threading.Lock()  # 添加API锁，防止并发请求
-        self.last_api_call = 0  # 上次API调用时间戳
+        
+        # 批次轮流请求控制
+        self.api_semaphore = threading.Semaphore(1)  # 同时只允许一个市场请求API
+        self.market_turn_lock = threading.Lock()  # 市场轮流锁
+        self.current_turn = 'HK'  # 当前轮到的市场 ('HK' 或 'US')
+        self.active_markets = set()  # 活跃的市场集合
+        self.last_api_call = {}  # 每个市场的上次API调用时间
         self.min_api_interval = 5  # API调用最小间隔(秒)
         
-    def wait_for_api_availability(self):
-        """等待API可用（限流保护）"""
-        with self.api_lock:
-            now = time.time()
-            elapsed = now - self.last_api_call
+        # 监控配置
+        self.hk_enabled = len(HK_MONITOR_STOCKS) > 0
+        self.us_enabled = len(US_MONITOR_STOCKS) > 0
+        
+        self.logger.info(f"监控配置 - 港股: {'启用' if self.hk_enabled else '禁用'}, 美股: {'启用' if self.us_enabled else '禁用'}")
+        
+    def register_market(self, market: str):
+        """注册活跃市场"""
+        with self.market_turn_lock:
+            self.active_markets.add(market)
+            self.logger.info(f"市场 {market} 已注册，当前活跃市场: {self.active_markets}")
+    
+    def unregister_market(self, market: str):
+        """注销市场"""
+        with self.market_turn_lock:
+            self.active_markets.discard(market)
+            self.logger.info(f"市场 {market} 已注销，当前活跃市场: {self.active_markets}")
+    
+    def wait_for_turn_and_acquire_api(self, market: str) -> bool:
+        """等待轮到该市场并获取API访问权限"""
+        # 如果只有一个市场活跃，直接获取API权限
+        with self.market_turn_lock:
+            if len(self.active_markets) <= 1:
+                self.logger.debug(f"{market} 市场：单一市场模式，直接获取API权限")
+                self.api_semaphore.acquire()
+                return True
+        
+        # 多市场模式：等待轮到该市场
+        max_wait_cycles = 60  # 最多等待60个周期（约5分钟）
+        wait_cycle = 0
+        
+        while self.running and wait_cycle < max_wait_cycles:
+            with self.market_turn_lock:
+                if self.current_turn == market:
+                    # 轮到该市场，尝试获取API权限
+                    if self.api_semaphore.acquire(blocking=False):
+                        self.logger.info(f"✅ {market} 市场获得API访问权限")
+                        return True
+                    else:
+                        self.logger.warning(f"⚠️ {market} 市场轮到但API被占用")
+                        
+            # 等待5秒后重试
+            time.sleep(5)
+            wait_cycle += 1
+        
+        self.logger.error(f"❌ {market} 市场等待API权限超时")
+        return False
+    
+    def release_api_and_switch_turn(self, market: str):
+        """释放API权限并切换到下一个市场"""
+        try:
+            # 记录API调用时间
+            self.last_api_call[market] = time.time()
             
+            # 释放API权限
+            self.api_semaphore.release()
+            
+            # 切换到下一个市场
+            with self.market_turn_lock:
+                if len(self.active_markets) > 1:
+                    # 多市场模式：切换到另一个市场
+                    if market == 'HK' and 'US' in self.active_markets:
+                        self.current_turn = 'US'
+                    elif market == 'US' and 'HK' in self.active_markets:
+                        self.current_turn = 'HK'
+                    
+                    self.logger.info(f"🔄 API权限已释放，下一轮: {self.current_turn}")
+                else:
+                    # 单市场模式：保持当前市场
+                    self.logger.debug(f"🔄 {market} 市场：单一市场模式，API权限已释放")
+                    
+        except Exception as e:
+            self.logger.error(f"释放API权限时出错: {e}")
+    
+    def wait_for_api_cooldown(self, market: str):
+        """等待API冷却时间"""
+        if market in self.last_api_call:
+            elapsed = time.time() - self.last_api_call[market]
             if elapsed < self.min_api_interval:
                 wait_time = self.min_api_interval - elapsed
-                self.logger.debug(f"API限流保护：等待{wait_time:.1f}秒")
+                self.logger.debug(f"{market} API冷却：等待{wait_time:.1f}秒")
                 time.sleep(wait_time)
-            
-            self.last_api_call = time.time()
     
     def start_hk_monitor(self):
         """启动港股监控"""
+        if not self.hk_enabled:
+            self.logger.info("🇭🇰 港股监控已禁用（无监控股票）")
+            return
+            
         try:
             self.logger.info("🇭🇰 启动港股期权监控线程")
             self.hk_monitor = V2OptionMonitor(market='HK')
             self.logger.info(f"📋 港股监控列表: {len(HK_MONITOR_STOCKS)} 只股票")
             
-            # 港股线程先等待5秒，避免与美股线程同时启动
-            self.logger.info("港股监控线程等待5秒，错峰启动...")
-            time.sleep(5)
+            # 注册港股市场
+            self.register_market('HK')
             
-            # 监控循环中添加错峰机制
+            # 监控循环
             scan_interval = 120  # 基础扫描间隔(秒) - 2分钟
             
             while self.running:
@@ -92,24 +170,32 @@ class MultiMarketMonitor:
                     should_monitor = should_monitor_market('HK')
                     
                     if is_trading or should_monitor:
-                        self.logger.info("🇭🇰 港股监控开始扫描...")
+                        self.logger.info("🇭🇰 港股监控准备扫描...")
                         
-                        # 获取API锁，确保不与美股监控同时请求API
-                        self.wait_for_api_availability()
-                        
-                        if is_trading:
-                            self.logger.info("✅ 港股交易时间，正常监控并发送所有通知")
-                            self.hk_monitor.manual_scan()
+                        # 等待轮到港股并获取API权限
+                        if self.wait_for_turn_and_acquire_api('HK'):
+                            try:
+                                # 等待API冷却
+                                self.wait_for_api_cooldown('HK')
+                                
+                                if is_trading:
+                                    self.logger.info("✅ 港股交易时间，正常监控并发送所有通知")
+                                    self.hk_monitor.manual_scan()
+                                else:
+                                    self.logger.info("⏰ 港股非交易时间，继续监控数据但不发送额外通知")
+                                    self.hk_monitor.manual_scan()
+                                    
+                            finally:
+                                # 释放API权限并切换轮次
+                                self.release_api_and_switch_turn('HK')
                         else:
-                            self.logger.info("⏰ 港股非交易时间，继续监控数据但不发送额外通知")
-                            self.hk_monitor.manual_scan()
+                            self.logger.warning("⚠️ 港股监控未能获取API权限，跳过本次扫描")
                     else:
                         self.logger.info("🔒 港股非交易时间且调试开关已关闭，跳过数据更新")
                     
-                    # 添加随机延时(115-125秒)，避免与美股监控同步
-                    jitter = scan_interval + (hash(f"hk_{time.time()}") % 10)
-                    self.logger.info(f"港股监控等待{jitter}秒(约{jitter/60:.1f}分钟)后下次扫描")
-                    time.sleep(jitter)
+                    # 等待下次扫描
+                    self.logger.info(f"港股监控等待{scan_interval}秒(约{scan_interval/60:.1f}分钟)后下次扫描")
+                    time.sleep(scan_interval)
                     
                 except Exception as e:
                     self.logger.error(f"❌ 港股监控异常: {e}")
@@ -117,19 +203,30 @@ class MultiMarketMonitor:
                     
         except Exception as e:
             self.logger.error(f"❌ 港股监控线程异常: {e}")
+        finally:
+            # 注销港股市场
+            self.unregister_market('HK')
     
     def start_us_monitor(self):
         """启动美股监控"""
+        if not self.us_enabled:
+            self.logger.info("🇺🇸 美股监控已禁用（无监控股票）")
+            return
+            
         try:
             self.logger.info("🇺🇸 启动美股期权监控线程")
             self.us_monitor = V2OptionMonitor(market='US')
             self.logger.info(f"📋 美股监控列表: {len(US_MONITOR_STOCKS)} 只股票")
             
-            # 美股线程先等待60秒，确保与港股错开1分钟
-            self.logger.info("美股监控线程等待60秒，错峰启动...")
-            time.sleep(60)
+            # 注册美股市场
+            self.register_market('US')
             
-            # 监控循环中添加错峰机制
+            # 如果是多市场模式，美股线程等待60秒错峰启动
+            if self.hk_enabled and self.us_enabled:
+                self.logger.info("美股监控线程等待60秒，错峰启动...")
+                time.sleep(60)
+            
+            # 监控循环
             scan_interval = 120  # 基础扫描间隔(秒) - 2分钟
             
             while self.running:
@@ -138,24 +235,32 @@ class MultiMarketMonitor:
                     should_monitor = should_monitor_market('US')
                     
                     if is_trading or should_monitor:
-                        self.logger.info("🇺🇸 美股监控开始扫描...")
+                        self.logger.info("🇺🇸 美股监控准备扫描...")
                         
-                        # 获取API锁，确保不与港股监控同时请求API
-                        self.wait_for_api_availability()
-                        
-                        if is_trading:
-                            self.logger.info("✅ 美股交易时间，正常监控并发送所有通知")
-                            self.us_monitor.manual_scan()
+                        # 等待轮到美股并获取API权限
+                        if self.wait_for_turn_and_acquire_api('US'):
+                            try:
+                                # 等待API冷却
+                                self.wait_for_api_cooldown('US')
+                                
+                                if is_trading:
+                                    self.logger.info("✅ 美股交易时间，正常监控并发送所有通知")
+                                    self.us_monitor.manual_scan()
+                                else:
+                                    self.logger.info("⏰ 美股非交易时间，继续监控数据但不发送额外通知")
+                                    self.us_monitor.manual_scan()
+                                    
+                            finally:
+                                # 释放API权限并切换轮次
+                                self.release_api_and_switch_turn('US')
                         else:
-                            self.logger.info("⏰ 美股非交易时间，继续监控数据但不发送额外通知")
-                            self.us_monitor.manual_scan()
+                            self.logger.warning("⚠️ 美股监控未能获取API权限，跳过本次扫描")
                     else:
                         self.logger.info("🔒 美股非交易时间且调试开关已关闭，跳过数据更新")
                     
-                    # 添加随机延时(115-125秒)，避免与港股监控同步
-                    jitter = scan_interval + (hash(f"us_{time.time()}") % 10)
-                    self.logger.info(f"美股监控等待{jitter}秒(约{jitter/60:.1f}分钟)后下次扫描")
-                    time.sleep(jitter)
+                    # 等待下次扫描
+                    self.logger.info(f"美股监控等待{scan_interval}秒(约{scan_interval/60:.1f}分钟)后下次扫描")
+                    time.sleep(scan_interval)
                     
                 except Exception as e:
                     self.logger.error(f"❌ 美股监控异常: {e}")
@@ -163,28 +268,41 @@ class MultiMarketMonitor:
                     
         except Exception as e:
             self.logger.error(f"❌ 美股监控线程异常: {e}")
+        finally:
+            # 注销美股市场
+            self.unregister_market('US')
     
     def start_monitoring(self):
         """开始多市场监控"""
         self.running = True
         
-        # 创建监控线程
-        hk_thread = threading.Thread(target=self.start_hk_monitor, name="HK-Monitor")
-        us_thread = threading.Thread(target=self.start_us_monitor, name="US-Monitor")
+        # 根据配置决定启动哪些线程
+        threads = []
         
-        # 设置为守护线程
-        hk_thread.daemon = True
-        us_thread.daemon = True
+        if self.hk_enabled:
+            hk_thread = threading.Thread(target=self.start_hk_monitor, name="HK-Monitor")
+            hk_thread.daemon = True
+            threads.append(('HK', hk_thread))
         
-        # 启动线程 - 先启动港股，再启动美股，确保错峰
-        self.logger.info("🚀 启动港股监控线程...")
-        hk_thread.start()
+        if self.us_enabled:
+            us_thread = threading.Thread(target=self.start_us_monitor, name="US-Monitor")
+            us_thread.daemon = True
+            threads.append(('US', us_thread))
         
-        self.logger.info("⏱️ 等待60秒(1分钟)后启动美股监控线程...")
-        time.sleep(60)
+        if not threads:
+            self.logger.error("❌ 没有启用任何市场监控，请检查配置")
+            return
         
-        self.logger.info("🚀 启动美股监控线程...")
-        us_thread.start()
+        # 启动线程
+        for market, thread in threads:
+            self.logger.info(f"🚀 启动{market}监控线程...")
+            thread.start()
+        
+        # 显示启动模式
+        if len(threads) == 1:
+            self.logger.info("📱 单一市场监控模式：无需等待API轮次")
+        else:
+            self.logger.info("🔄 多市场监控模式：批次轮流请求API")
         
         self.logger.info("🚀 多市场期权监控已启动")
         
@@ -193,22 +311,25 @@ class MultiMarketMonitor:
             while self.running:
                 # 每10分钟输出一次状态
                 time.sleep(600)
-                hk_status = "运行中" if hk_thread.is_alive() else "已停止"
-                us_status = "运行中" if us_thread.is_alive() else "已停止"
-                self.logger.info(f"📊 监控状态 - 港股: {hk_status}, 美股: {us_status}")
+                
+                status_info = []
+                for market, thread in threads:
+                    status = "运行中" if thread.is_alive() else "已停止"
+                    status_info.append(f"{market}: {status}")
+                
+                self.logger.info(f"📊 监控状态 - {', '.join(status_info)}")
                 
                 # 检查线程是否还活着，如果死了就重启
-                if not hk_thread.is_alive():
-                    self.logger.warning("🔄 港股监控线程已停止，重新启动...")
-                    hk_thread = threading.Thread(target=self.start_hk_monitor, name="HK-Monitor")
-                    hk_thread.daemon = True
-                    hk_thread.start()
-                
-                if not us_thread.is_alive():
-                    self.logger.warning("🔄 美股监控线程已停止，重新启动...")
-                    us_thread = threading.Thread(target=self.start_us_monitor, name="US-Monitor")
-                    us_thread.daemon = True
-                    us_thread.start()
+                for i, (market, thread) in enumerate(threads):
+                    if not thread.is_alive():
+                        self.logger.warning(f"🔄 {market}监控线程已停止，重新启动...")
+                        if market == 'HK':
+                            new_thread = threading.Thread(target=self.start_hk_monitor, name="HK-Monitor")
+                        else:
+                            new_thread = threading.Thread(target=self.start_us_monitor, name="US-Monitor")
+                        new_thread.daemon = True
+                        new_thread.start()
+                        threads[i] = (market, new_thread)
                     
         except KeyboardInterrupt:
             self.logger.info("👋 用户中断，停止监控")
@@ -223,30 +344,46 @@ def main():
     """主函数"""
     logger = setup_logging()
     logger.info("🌍 多市场期权监控系统启动")
-    logger.info("⚠️ 多市场模式已启用错峰请求机制，避免API并发失败")
-    logger.info("⏱️ 单一市场轮询间隔: 2分钟，市场间间隔: 1分钟")
     
     try:
         # 显示监控配置
         logger.info("📊 监控配置:")
-        logger.info(f"  🇭🇰 港股: {len(HK_MONITOR_STOCKS)} 只股票")
-        for stock_code in HK_MONITOR_STOCKS:
-            logger.info(f"    - {stock_code}")
+        hk_enabled = len(HK_MONITOR_STOCKS) > 0
+        us_enabled = len(US_MONITOR_STOCKS) > 0
         
-        logger.info(f"  🇺🇸 美股: {len(US_MONITOR_STOCKS)} 只股票")
-        for stock_code in US_MONITOR_STOCKS:
-            logger.info(f"    - {stock_code}")
+        if hk_enabled:
+            logger.info(f"  🇭🇰 港股: {len(HK_MONITOR_STOCKS)} 只股票")
+            for stock_code in HK_MONITOR_STOCKS:
+                logger.info(f"    - {stock_code}")
+        else:
+            logger.info("  🇭🇰 港股: 已禁用（无监控股票）")
+        
+        if us_enabled:
+            logger.info(f"  🇺🇸 美股: {len(US_MONITOR_STOCKS)} 只股票")
+            for stock_code in US_MONITOR_STOCKS:
+                logger.info(f"    - {stock_code}")
+        else:
+            logger.info("  🇺🇸 美股: 已禁用（无监控股票）")
+        
+        # 显示运行模式
+        if hk_enabled and us_enabled:
+            logger.info("🔄 多市场模式：批次轮流请求API，避免并发冲突")
+            logger.info("⏱️ 轮询间隔: 2分钟/市场，市场间自动轮流")
+        elif hk_enabled or us_enabled:
+            logger.info("📱 单一市场模式：无需等待API轮次，直接请求")
+            logger.info("⏱️ 轮询间隔: 2分钟")
+        else:
+            logger.error("❌ 没有启用任何市场监控，请检查配置")
+            return
         
         # 检查当前交易时间
-        hk_trading = is_hk_trading_time()
-        us_trading = is_us_trading_time()
+        if hk_enabled:
+            hk_trading = is_hk_trading_time()
+            logger.info(f"  🇭🇰 港股: {'交易中' if hk_trading else '休市'}")
         
-        logger.info(f"⏰ 当前交易状态:")
-        logger.info(f"  🇭🇰 港股: {'交易中' if hk_trading else '休市'}")
-        logger.info(f"  🇺🇸 美股: {'交易中' if us_trading else '休市'}")
-        
-        if not hk_trading and not us_trading:
-            logger.warning("⚠️  当前两个市场都在休市，但系统将继续运行")
+        if us_enabled:
+            us_trading = is_us_trading_time()
+            logger.info(f"  🇺🇸 美股: {'交易中' if us_trading else '休市'}")
         
         # 创建并启动多市场监控
         monitor = MultiMarketMonitor()

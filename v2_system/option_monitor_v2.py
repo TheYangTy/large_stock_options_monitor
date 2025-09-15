@@ -64,7 +64,7 @@ class V2OptionMonitor:
         self.option_chain_cache = {}  # 期权链缓存
         self.last_scan_time = None
         self.scan_count = 0
-        self.previous_options = []  # 上次扫描的期权数据
+        self.previous_options = {}  # 上次扫描的期权数据
         
         # 连接状态管理
         self.connection_lock = threading.Lock()
@@ -274,8 +274,17 @@ class V2OptionMonitor:
                 self.data_handler.save_option_data(big_options)
                 self.big_options_processor.save_big_options_summary(big_options_with_diff)
                 
-                # 更新历史数据
-                self.previous_options = big_options_with_diff
+                # 更新历史数据（按期权代码更新，保持全量缓存字典）
+                if not hasattr(self, 'previous_options') or self.previous_options is None:
+                    self.previous_options = {}
+                
+                # 将当前期权数据按代码更新到缓存字典中
+                for current_opt in big_options:
+                    option_code = current_opt.get('option_code', '')
+                    if option_code:
+                        self.previous_options[option_code] = current_opt
+                
+                self.logger.debug(f"V2系统缓存更新: 当前{len(big_options)}个期权，全量缓存{len(self.previous_options)}个期权")
                 
             else:
                 self.logger.info("V2系统本次扫描未发现大单期权")
@@ -348,9 +357,6 @@ class V2OptionMonitor:
             
             # 发送启动通知 - 加载历史数据，但不立即扫描（避免与轮询线程重复）
             self.logger.info("V2系统启动，加载历史数据")
-            
-            # 先加载历史数据
-            self.load_previous_options()
             
             # 发送简单启动通知，实际扫描由轮询线程负责
             self.notifier.send_wework_notification("V2系统期权大单监控已启动")
@@ -480,41 +486,42 @@ class V2OptionMonitor:
         """从数据库加载历史期权数据作为比较基准"""
         try:
             # 直接从数据库加载最近2小时的期权数据
-            self.previous_options = self.data_handler.load_recent_option_data(hours=2)
+            recent_data = self.data_handler.load_recent_option_data(hours=2)
+            
+            # 转换为字典结构
+            self.previous_options = {}
+            for opt in recent_data:
+                option_code = opt.get('option_code', '')
+                if option_code:
+                    self.previous_options[option_code] = opt
             
             self.logger.info(f"V2系统从数据库加载历史期权数据: {len(self.previous_options)} 条记录")
             
         except Exception as e:
             self.logger.error(f"V2系统从数据库加载历史期权数据失败: {e}")
-            self.previous_options = []
+            self.previous_options = {}
     
     def compare_with_previous_options(self, current_options: List[Dict]) -> List[Dict]:
-        """与内存中的上次扫描结果比较，计算增量"""
+        """使用已计算好的变化量进行过滤，不重新计算"""
         try:
-            # 构建上次扫描的期权成交量字典
-            previous_volumes = {}
-            if self.previous_options:
-                for prev_opt in self.previous_options:
-                    option_code = prev_opt.get('option_code', '')
-                    volume = prev_opt.get('volume', 0)
-                    previous_volumes[option_code] = volume
-            
-            # 计算当前数据的增量
+            # 直接使用 big_options_processor 中已经计算好的 volume_diff
+            # 不再重新计算，避免不一致的问题
             options_with_diff = []
             for current_opt in current_options:
                 option_code = current_opt.get('option_code', '')
+                
+                # 使用已经计算好的变化量（在 big_options_processor 中计算）
                 current_volume = current_opt.get('volume', 0)
+                volume_diff = current_opt.get('volume_diff', 0)
+                previous_volume = current_opt.get('last_volume', 0)
                 
-                # 获取上次扫描的成交量
-                previous_volume = previous_volumes.get(option_code, 0)
+                # 如果没有 volume_diff 字段，说明数据有问题，跳过
+                if 'volume_diff' not in current_opt:
+                    self.logger.warning(f"期权 {option_code} 缺少 volume_diff 字段，跳过")
+                    continue
                 
-                # 计算成交量差值
-                volume_diff = current_volume - previous_volume
-                
-                # 添加增量信息
+                # 直接使用传入的数据，不修改
                 opt_with_diff = current_opt.copy()
-                opt_with_diff['last_volume'] = previous_volume
-                opt_with_diff['volume_diff'] = volume_diff
                 
                 # 获取该期权的过滤配置
                 stock_code = current_opt.get('stock_code', '')

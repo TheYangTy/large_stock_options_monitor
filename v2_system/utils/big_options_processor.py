@@ -48,6 +48,57 @@ def retry_on_api_error(max_retries: int = 3, *, delay: float = 5.0) -> Callable[
     return decorator
 
 
+def retry_api_call_with_empty_check(api_func, *args, max_retries: int = 3, delay: float = 5.0, **kwargs):
+    """
+    通用API调用重试函数，包含空数据检查
+    
+    Args:
+        api_func: API调用函数
+        *args: API函数的位置参数
+        max_retries: 最大重试次数
+        delay: 重试间隔(秒)
+        **kwargs: API函数的关键字参数
+    
+    Returns:
+        tuple: (ret_code, data) API调用结果
+    
+    Raises:
+        Exception: 重试次数用尽后抛出最后一次的异常
+    """
+    logger = logging.getLogger('V2OptionMonitor.BigOptionsProcessor')
+    
+    for attempt in range(max_retries):
+        try:
+            ret, data = api_func(*args, **kwargs)
+            
+            # 检查API调用是否成功
+            if ret != ft.RET_OK:
+                raise Exception(f"API调用失败，返回码: {ret}")
+            
+            # 检查数据是否为空
+            if hasattr(data, 'empty') and data.empty:
+                raise Exception("API调用返回空数据")
+            elif isinstance(data, (list, dict)) and len(data) == 0:
+                raise Exception("API调用返回空数据")
+            
+            # 成功获取到有效数据
+            logger.debug(f"API调用成功，获取到数据: {len(data) if hasattr(data, '__len__') else 'N/A'} 条记录")
+            return ret, data
+            
+        except Exception as e:
+            attempt_num = attempt + 1
+            if attempt_num >= max_retries:
+                logger.error(f"API调用失败，已重试{attempt_num}次，放弃: {e}")
+                raise
+            
+            logger.warning(f"API调用失败，{attempt_num}/{max_retries}次重试: {e}")
+            time.sleep(delay)
+            logger.info(f"正在进行第{attempt_num}次重试...")
+    
+    # 理论上不会到这里
+    return api_func(*args, **kwargs)
+
+
 class BigOptionsProcessor:
     """V2系统大单期权处理器"""
     
@@ -389,8 +440,12 @@ class BigOptionsProcessor:
         # 批量获取股价和名称
         try:
             self.logger.info(f"V2批量获取 {len(stocks_to_update)} 只股票的价格和名称...")
-            ret, data = quote_ctx.get_market_snapshot(stocks_to_update)
-            
+            ret, data = retry_api_call_with_empty_check(
+                quote_ctx.get_market_snapshot,
+                stocks_to_update,
+                max_retries=3,
+                delay=10.0
+            )
             if ret == ft.RET_OK and not data.empty:
                 for _, row in data.iterrows():
                     code = row['code']
@@ -406,7 +461,7 @@ class BigOptionsProcessor:
                     self.stock_price_cache[code] = stock_info
                     self.price_cache_time[code] = current_time
                     self.logger.debug(f"V2获取股票信息: {code} = {price} ({name})")
-                    
+                        
                     # 保存股票信息到数据库
                     try:
                         from .database_manager import get_database_manager
@@ -419,7 +474,7 @@ class BigOptionsProcessor:
                     except Exception as e:
                         self.logger.warning(f"V2保存股票信息到数据库失败 {code}: {e}")
                 
-                self.logger.info(f"V2成功获取 {len(data)} 只股票的价格和名称")
+                    self.logger.info(f"V2成功获取 {len(data)} 只股票的价格和名称")
             else:
                 self.logger.warning(f"V2批量获取股票信息失败: {ret}")
                 # 使用缓存中的旧数据
@@ -507,7 +562,12 @@ class BigOptionsProcessor:
                 return stock_info
             
             # 获取实时股票信息
-            ret, snap_data = quote_ctx.get_market_snapshot([stock_code])
+            ret, snap_data = retry_api_call_with_empty_check(
+                quote_ctx.get_market_snapshot,
+                [stock_code],
+                max_retries=3,
+                delay=10.0
+            )
             if ret == ft.RET_OK and not snap_data.empty:
                 row = snap_data.iloc[0]
                 price = float(row['last_price'])
@@ -517,7 +577,7 @@ class BigOptionsProcessor:
                 self.stock_price_cache[stock_code] = stock_info
                 self.price_cache_time[stock_code] = current_time
                 self.logger.debug(f"V2获取股票信息: {stock_code} = {price} ({name})")
-                
+
                 # 保存股票信息到数据库
                 try:
                     from .database_manager import get_database_manager
@@ -682,16 +742,22 @@ class BigOptionsProcessor:
             
             # 获取期权到期日 - 支持港股和美股
             try:
-                ret, expiry_data = quote_ctx.get_option_expiration_date(stock_code)
+                ret, expiry_data = retry_api_call_with_empty_check(
+                    quote_ctx.get_option_expiration_date,
+                    stock_code,
+                    max_retries=3,
+                    delay=10.0
+                )
+
                 if ret != ft.RET_OK or expiry_data.empty:
                     self.logger.warning(f"V2 {stock_code}({market_type})没有期权合约或API调用失败")
                     return []
-                
+
                 # 根据市场类型调整时间范围
                 now = datetime.now()
                 if market_type == 'US':
                     # 美股期权通常有更多到期日，可以选择更近的
-                    time_range_days = 45  # 1.5个月
+                    time_range_days = 30  # 1个月
                 else:
                     # 港股期权
                     time_range_days = 30  # 1个月
@@ -728,32 +794,24 @@ class BigOptionsProcessor:
                         
                         self.logger.debug(f"V2获取 {stock_code}({market_type}) {date_str} 的期权链")
                         
-                        # 根据市场类型调整期权链获取参数
-                        if market_type == 'US':
-                            # 美股期权可能需要不同的参数
-                            ret2, option_data = quote_ctx.get_option_chain(
+                        # 使用新的重试函数获取期权链数据
+                        try:
+                            ret2, option_data = retry_api_call_with_empty_check(
+                                quote_ctx.get_option_chain,
                                 code=stock_code, 
                                 start=date_str, 
                                 end=date_str,
                                 option_type=ft.OptionType.ALL,
-                                option_cond_type=ft.OptionCondType.ALL
+                                option_cond_type=ft.OptionCondType.ALL,
+                                max_retries=3,
+                                delay=10.0
                             )
-                        else:
-                            # 港股期权
-                            ret2, option_data = quote_ctx.get_option_chain(
-                                code=stock_code, 
-                                start=date_str, 
-                                end=date_str,
-                                option_type=ft.OptionType.ALL,
-                                option_cond_type=ft.OptionCondType.ALL
-                            )
-                                
-                        if ret2 == ft.RET_OK and not option_data.empty:
                             self.logger.info(f"V2 API调用成功: {stock_code}({market_type}) {expiry_date}, 获取到 {len(option_data)} 个期权")
-                        else:
-                            self.logger.warning(f"V2 API调用返回空数据: {stock_code}({market_type}) {expiry_date}")
+                        except Exception as e:
+                            self.logger.warning(f"V2 API调用失败: {stock_code}({market_type}) {expiry_date}, 错误: {e}")
+                            continue  # 跳过这个到期日，继续处理下一个
                         
-                        time.sleep(0.5)  # 避免API限流
+                        time.sleep(1)  # 避免API限流
                         
                         if ret2 == ft.RET_OK and not option_data.empty:
                             # 筛选执行价格在当前股价上下范围内的期权
@@ -817,10 +875,17 @@ class BigOptionsProcessor:
             
             # 🚀 批量获取期权市场快照 - 一次API调用获取所有期权数据
             self.logger.info(f"V2批量获取{len(option_codes)}个期权的市场快照")
-            ret, snapshot_data = quote_ctx.get_market_snapshot(option_codes)
             
-            if ret != ft.RET_OK or snapshot_data.empty:
-                self.logger.warning(f"V2批量获取期权快照失败: {ret}")
+            try:
+                ret, snapshot_data = retry_api_call_with_empty_check(
+                    quote_ctx.get_market_snapshot,
+                    option_codes,
+                    max_retries=3,
+                    delay=10.0
+                )
+                self.logger.info(f"V2批量获取期权快照成功，获取到 {len(snapshot_data)} 条数据")
+            except Exception as e:
+                self.logger.warning(f"V2批量获取期权快照失败: {e}")
                 return []
             
             # 获取相关股票价格（批量获取）
@@ -838,12 +903,16 @@ class BigOptionsProcessor:
             else:
                 # 批量获取股票快照
                 try:
-                    ret_stock, stock_data = quote_ctx.get_market_snapshot(unique_stocks)
-                    if ret_stock == ft.RET_OK and not stock_data.empty:
-                        for _, row in stock_data.iterrows():
-                            stock_code = row['code']
-                            stock_prices[stock_code] = float(row.get('last_price', 0))
-                            stock_names[stock_code] = row.get('name', get_stock_name(stock_code))
+                    ret_stock, stock_data = retry_api_call_with_empty_check(
+                        quote_ctx.get_market_snapshot,
+                        unique_stocks,
+                        max_retries=3,
+                        delay=10.0
+                    )
+                    for _, row in stock_data.iterrows():
+                        stock_code = row['code']
+                        stock_prices[stock_code] = float(row.get('last_price', 0))
+                        stock_names[stock_code] = row.get('name', get_stock_name(stock_code))
                 except Exception as e:
                     self.logger.warning(f"V2批量获取股票价格失败: {e}")
                     # 使用默认价格

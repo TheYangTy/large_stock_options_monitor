@@ -123,9 +123,9 @@
                             <code>{{ trade.option_code }}</code>
                         </td>
                         <td>
-                            {% if 'C' in trade.option_code %}
+                            {% if trade.option_type == 'Call' %}
                                 <span class="badge bg-success">Call</span>
-                            {% elif 'P' in trade.option_code %}
+                            {% elif trade.option_type == 'Put' %}
                                 <span class="badge bg-danger">Put</span>
                             {% else %}
                                 <span class="badge bg-secondary">-</span>

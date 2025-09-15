@@ -66,9 +66,11 @@ class MultiMarketMonitor:
         
         # 监控配置
         self.hk_enabled = len(HK_MONITOR_STOCKS) > 0
-        self.us_enabled = len(US_MONITOR_STOCKS) > 0
+        self.us_enabled = len(US_MONITOR_STOCKS) > 0 and should_update_data_off_hours('US')
         
         self.logger.info(f"监控配置 - 港股: {'启用' if self.hk_enabled else '禁用'}, 美股: {'启用' if self.us_enabled else '禁用'}")
+        if len(US_MONITOR_STOCKS) > 0 and not should_update_data_off_hours('US'):
+            self.logger.info("美股监控已禁用：非交易时间调试开关已关闭")
         
     def register_market(self, market: str):
         """注册活跃市场"""
@@ -161,8 +163,11 @@ class MultiMarketMonitor:
             # 注册港股市场
             self.register_market('HK')
             
-            # 监控循环
-            scan_interval = 120  # 基础扫描间隔(秒) - 2分钟
+            # 监控循环 - 根据市场数量调整间隔
+            if self.hk_enabled and self.us_enabled:
+                scan_interval = 120  # 多市场模式：2分钟
+            else:
+                scan_interval = 60   # 单市场模式：1分钟
             
             while self.running:
                 try:
@@ -226,8 +231,11 @@ class MultiMarketMonitor:
                 self.logger.info("美股监控线程等待60秒，错峰启动...")
                 time.sleep(60)
             
-            # 监控循环
-            scan_interval = 120  # 基础扫描间隔(秒) - 2分钟
+            # 监控循环 - 根据市场数量调整间隔
+            if self.hk_enabled and self.us_enabled:
+                scan_interval = 120  # 多市场模式：2分钟
+            else:
+                scan_interval = 60   # 单市场模式：1分钟
             
             while self.running:
                 try:
@@ -371,7 +379,7 @@ def main():
             logger.info("⏱️ 轮询间隔: 2分钟/市场，市场间自动轮流")
         elif hk_enabled or us_enabled:
             logger.info("📱 单一市场模式：无需等待API轮次，直接请求")
-            logger.info("⏱️ 轮询间隔: 2分钟")
+            logger.info("⏱️ 轮询间隔: 1分钟（单市场优化）")
         else:
             logger.error("❌ 没有启用任何市场监控，请检查配置")
             return

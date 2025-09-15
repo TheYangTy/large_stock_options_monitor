@@ -314,53 +314,6 @@ class V2OptionMonitor:
             self.logger.error(f"V2系统检查交易时间失败: {e}")
             return True  # 异常时默认为交易时间
     
-    def is_market_opening_time(self) -> bool:
-        """检查是否为市场开盘时间（开盘后30分钟内）"""
-        try:
-            from config import HK_TRADING_HOURS, US_TRADING_HOURS_DST, US_TRADING_HOURS_STD, is_us_dst
-            from datetime import datetime, time, timedelta
-            
-            now = datetime.now()
-            
-            # 根据市场类型判断
-            if self.market == 'HK':
-                # 港股开盘时间：9:30
-                market_open_str = HK_TRADING_HOURS['market_open']
-                market_open_time = datetime.strptime(market_open_str, '%H:%M')
-                
-                # 开盘后30分钟内视为开盘时间
-                opening_end_time = market_open_time + timedelta(minutes=30)
-                
-                # 只比较小时和分钟
-                now_time = now.replace(year=market_open_time.year, month=market_open_time.month, day=market_open_time.day)
-                
-                # 判断是否在开盘时间范围内
-                return market_open_time <= now_time <= opening_end_time
-                
-            elif self.market == 'US':
-                # 根据夏令时/冬令时选择交易时间
-                if is_us_dst():
-                    trading_hours = US_TRADING_HOURS_DST
-                else:
-                    trading_hours = US_TRADING_HOURS_STD
-                
-                market_open_str = trading_hours['market_open']
-                market_open_time = datetime.strptime(market_open_str, '%H:%M')
-                
-                # 开盘后30分钟内视为开盘时间
-                opening_end_time = market_open_time + timedelta(minutes=30)
-                
-                # 只比较小时和分钟
-                now_time = now.replace(year=market_open_time.year, month=market_open_time.month, day=market_open_time.day)
-                
-                # 判断是否在开盘时间范围内
-                return market_open_time <= now_time <= opening_end_time
-            
-            return False
-            
-        except Exception as e:
-            self.logger.error(f"V2系统检查开盘时间失败: {e}")
-            return False  # 异常时默认为非开盘时间
     
     def start_monitoring(self):
         """启动监控"""
@@ -536,13 +489,15 @@ class V2OptionMonitor:
             self.previous_options = []
     
     def compare_with_previous_options(self, current_options: List[Dict]) -> List[Dict]:
-        """与数据库中上一条记录比较，计算增量"""
+        """与内存中的上次扫描结果比较，计算增量"""
         try:
-            # 构建当前期权成交量字典
-            current_volumes = {opt.get('option_code', ''): opt.get('volume', 0) for opt in current_options}
-            
-            # 批量获取所有期权的上一条记录成交量
-            previous_volumes = self.data_handler.db_manager.get_all_previous_option_volumes(current_volumes)
+            # 构建上次扫描的期权成交量字典
+            previous_volumes = {}
+            if self.previous_options:
+                for prev_opt in self.previous_options:
+                    option_code = prev_opt.get('option_code', '')
+                    volume = prev_opt.get('volume', 0)
+                    previous_volumes[option_code] = volume
             
             # 计算当前数据的增量
             options_with_diff = []
@@ -550,7 +505,7 @@ class V2OptionMonitor:
                 option_code = current_opt.get('option_code', '')
                 current_volume = current_opt.get('volume', 0)
                 
-                # 获取上一条记录的成交量
+                # 获取上次扫描的成交量
                 previous_volume = previous_volumes.get(option_code, 0)
                 
                 # 计算成交量差值
@@ -561,18 +516,34 @@ class V2OptionMonitor:
                 opt_with_diff['last_volume'] = previous_volume
                 opt_with_diff['volume_diff'] = volume_diff
                 
-                # 发送通知的条件：
-                # 1. 成交量有变化 (volume_diff != 0) - 后续增量变化
-                # 2. 首次记录的大单 (previous_volume == 0 且 current_volume > 0) - 新发现的大单
-                is_first_record = (previous_volume == 0 and current_volume > 0)
+                # 获取该期权的过滤配置
+                stock_code = current_opt.get('stock_code', '')
                 
-                if volume_diff != 0 or is_first_record:
-                    # 有增量变化或首次记录，发送通知
+                # 获取增量阈值配置
+                from config import OPTION_FILTERS, get_market_type
+                market_type = get_market_type(stock_code)
+                default_key = f'{market_type.lower()}_default'
+                
+                # 优先使用股票特定配置，否则使用默认配置
+                filter_config = OPTION_FILTERS.get(stock_code, OPTION_FILTERS.get(default_key, {}))
+                min_volume_diff = filter_config.get('min_volume_diff', 10)  # 默认最小增量1张
+                
+                # 发送通知的条件：
+                # 1. 首次记录的大单 (previous_volume == 0 且 current_volume > 0) - 新发现的大单
+                # 2. 增量变化且超过阈值 (abs(volume_diff) >= min_volume_diff) - 后续增量变化
+                is_first_record = (previous_volume == 0 and current_volume > 0)
+                is_significant_change = (abs(volume_diff) >= min_volume_diff)
+                
+                if is_first_record or (volume_diff != 0 and is_significant_change):
+                    # 首次记录或显著增量变化，发送通知
                     options_with_diff.append(opt_with_diff)
                     if is_first_record:
                         self.logger.debug(f"首次记录大单 {option_code}: 当前={current_volume}, 上次={previous_volume}")
                     else:
-                        self.logger.debug(f"期权有增量 {option_code}: 当前={current_volume}, 上次={previous_volume}, diff={volume_diff}")
+                        self.logger.debug(f"期权显著增量 {option_code}: 当前={current_volume}, 上次={previous_volume}, diff={volume_diff} (阈值:{min_volume_diff})")
+                elif volume_diff != 0:
+                    # 有变化但未达到阈值，不通知
+                    self.logger.debug(f"期权增量未达阈值 {option_code}: diff={volume_diff} < {min_volume_diff}，跳过通知")
               
             self.logger.info(f"V2系统期权增量比较: {len(current_options)} -> {len(options_with_diff)} (有变化)")
             return options_with_diff

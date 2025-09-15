@@ -262,17 +262,17 @@ class V2OptionMonitor:
             if big_options:
                 self.logger.info(f"V2系统发现 {len(big_options)} 笔大单期权")
                 
-                # 与历史数据比较，计算增量
+                # 与历史数据比较，计算增量（在保存之前比较）
                 big_options_with_diff = self.compare_with_previous_options(big_options)
-                
-                # 保存数据
-                self.data_handler.save_option_data(big_options_with_diff)
-                self.big_options_processor.save_big_options_summary(big_options_with_diff)
                 
                 # 发送一次合并的汇总通知（包含所有有变化的股票）
                 if big_options_with_diff:
                     # 使用V1风格的汇总报告，将所有股票合并在一个通知中
                     self.notifier.send_v1_style_summary_report(big_options_with_diff)
+                
+                # 保存数据（保存原始数据，确保下次比较时有正确的基准）
+                self.data_handler.save_option_data(big_options)
+                self.big_options_processor.save_big_options_summary(big_options_with_diff)
                 
                 # 更新历史数据
                 self.previous_options = big_options_with_diff
@@ -313,6 +313,54 @@ class V2OptionMonitor:
         except Exception as e:
             self.logger.error(f"V2系统检查交易时间失败: {e}")
             return True  # 异常时默认为交易时间
+    
+    def is_market_opening_time(self) -> bool:
+        """检查是否为市场开盘时间（开盘后30分钟内）"""
+        try:
+            from config import HK_TRADING_HOURS, US_TRADING_HOURS_DST, US_TRADING_HOURS_STD, is_us_dst
+            from datetime import datetime, time, timedelta
+            
+            now = datetime.now()
+            
+            # 根据市场类型判断
+            if self.market == 'HK':
+                # 港股开盘时间：9:30
+                market_open_str = HK_TRADING_HOURS['market_open']
+                market_open_time = datetime.strptime(market_open_str, '%H:%M')
+                
+                # 开盘后30分钟内视为开盘时间
+                opening_end_time = market_open_time + timedelta(minutes=30)
+                
+                # 只比较小时和分钟
+                now_time = now.replace(year=market_open_time.year, month=market_open_time.month, day=market_open_time.day)
+                
+                # 判断是否在开盘时间范围内
+                return market_open_time <= now_time <= opening_end_time
+                
+            elif self.market == 'US':
+                # 根据夏令时/冬令时选择交易时间
+                if is_us_dst():
+                    trading_hours = US_TRADING_HOURS_DST
+                else:
+                    trading_hours = US_TRADING_HOURS_STD
+                
+                market_open_str = trading_hours['market_open']
+                market_open_time = datetime.strptime(market_open_str, '%H:%M')
+                
+                # 开盘后30分钟内视为开盘时间
+                opening_end_time = market_open_time + timedelta(minutes=30)
+                
+                # 只比较小时和分钟
+                now_time = now.replace(year=market_open_time.year, month=market_open_time.month, day=market_open_time.day)
+                
+                # 判断是否在开盘时间范围内
+                return market_open_time <= now_time <= opening_end_time
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"V2系统检查开盘时间失败: {e}")
+            return False  # 异常时默认为非开盘时间
     
     def start_monitoring(self):
         """启动监控"""
@@ -513,10 +561,19 @@ class V2OptionMonitor:
                 opt_with_diff['last_volume'] = previous_volume
                 opt_with_diff['volume_diff'] = volume_diff
                 
-                # 只保留有变化的期权（新增或成交量增加）
-                if volume_diff > 0:
+                # 发送通知的条件：
+                # 1. 成交量有变化 (volume_diff != 0) - 后续增量变化
+                # 2. 首次记录的大单 (previous_volume == 0 且 current_volume > 0) - 新发现的大单
+                is_first_record = (previous_volume == 0 and current_volume > 0)
+                
+                if volume_diff != 0 or is_first_record:
+                    # 有增量变化或首次记录，发送通知
                     options_with_diff.append(opt_with_diff)
-            
+                    if is_first_record:
+                        self.logger.debug(f"首次记录大单 {option_code}: 当前={current_volume}, 上次={previous_volume}")
+                    else:
+                        self.logger.debug(f"期权有增量 {option_code}: 当前={current_volume}, 上次={previous_volume}, diff={volume_diff}")
+              
             self.logger.info(f"V2系统期权增量比较: {len(current_options)} -> {len(options_with_diff)} (有变化)")
             return options_with_diff
             

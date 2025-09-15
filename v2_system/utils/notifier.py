@@ -233,11 +233,16 @@ class V2Notifier:
             return False
         
         try:
-            # 过滤出有变化的期权（volume_diff > 0）
-            changed_options = [opt for opt in big_options if opt.get('volume_diff', 0) > 0]
+            # 过滤出有变化的期权（volume_diff > 0 或者是当日开盘后首次记录）
+            changed_options = []
+            for opt in big_options:
+                volume_diff = opt.get('volume_diff', 0)
+                # 当日开盘后首次记录的期权也应该包含在内
+                if volume_diff > 0 or (volume_diff == 0 and opt.get('last_volume', 0) == opt.get('volume', 0) and opt.get('volume', 0) > 0):
+                    changed_options.append(opt)
             
             if not changed_options:
-                self.logger.info("V2没有期权成交量变化，跳过通知")
+                self.logger.info("V2没有期权成交量变化或开盘后首次记录，跳过通知")
                 return False
             
             # 按股票分组
@@ -388,11 +393,16 @@ class V2Notifier:
             return False
         
         try:
-            # 过滤出有变化的期权（volume_diff > 0）
-            changed_options = [opt for opt in big_options if opt.get('volume_diff', 0) > 0]
+            # 过滤出有变化的期权（volume_diff > 0 或者是当日开盘后首次记录）
+            changed_options = []
+            for opt in big_options:
+                volume_diff = opt.get('volume_diff', 0)
+                # 当日开盘后首次记录的期权也应该包含在内
+                if volume_diff > 0 or (volume_diff == 0 and opt.get('last_volume', 0) == opt.get('volume', 0) and opt.get('volume', 0) > 0):
+                    changed_options.append(opt)
             
             if not changed_options:
-                self.logger.info("V2没有期权成交量变化，跳过汇总报告")
+                self.logger.info("V2没有期权成交量变化或开盘后首次记录，跳过汇总报告")
                 return False
             
             current_time = datetime.now()

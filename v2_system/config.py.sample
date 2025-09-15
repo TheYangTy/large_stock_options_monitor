@@ -1,0 +1,588 @@
+# -*- coding: utf-8 -*-
+"""
+V2系统独立配置文件
+"""
+
+import os
+from typing import Dict, Any, List
+
+# ==================== 富途API配置 ====================
+FUTU_CONFIG = {
+    'host': '127.0.0.1',
+    'port': 11111,
+    'unlock_pwd': '',  # 请填入您的交易密码
+    'market': 'HK',
+    'security_firm': 'FUTUSECURITIES',
+    'is_encrypt': False,
+    'rsa_path': None,
+    'auto_reconnect': True,
+    'max_reconnect_attempts': 10,
+    'reconnect_interval': 30,  # 秒
+    'heartbeat_interval': 60,  # 秒
+}
+
+# ==================== 数据库配置 ====================
+# 港股数据库配置
+HK_DATABASE_CONFIG = {
+    'db_path': 'data/hk_options_monitor_v2.db',
+    'backup_enabled': True,
+    'backup_interval': 24,  # 小时
+    'backup_keep_days': 30,
+    'auto_cleanup_enabled': True,
+    'cleanup_days': 90,  # 保留90天数据
+    'batch_size': 1000,
+    'connection_timeout': 30,
+}
+
+# 美股数据库配置
+US_DATABASE_CONFIG = {
+    'db_path': 'data/us_options_monitor_v2.db',
+    'backup_enabled': True,
+    'backup_interval': 24,  # 小时
+    'backup_keep_days': 30,
+    'auto_cleanup_enabled': True,
+    'cleanup_days': 90,  # 保留90天数据
+    'batch_size': 1000,
+    'connection_timeout': 30,
+}
+
+
+
+def get_database_config(market: str = 'HK') -> Dict[str, Any]:
+    """根据市场获取数据库配置"""
+    if market == 'US':
+        return US_DATABASE_CONFIG
+    else:
+        return HK_DATABASE_CONFIG
+
+# ==================== 监控股票配置 ====================
+# 港股监控列表
+HK_MONITOR_STOCKS = [
+    'HK.00700',  # 腾讯控股
+    'HK.09988',  # 阿里巴巴
+    'HK.03690',  # 美团
+    'HK.01810',  # 小米集团
+    'HK.09618',  # 京东集团
+    'HK.02318',  # 中国平安
+    'HK.00388',  # 香港交易所
+    'HK.00981',  # 中芯国际
+    'HK.02020',  # 安踏体育
+    'HK.01024',  # 快手
+]
+
+# 美股监控列表
+US_MONITOR_STOCKS = [
+    'US.AAPL',   # 苹果
+    'US.MSFT',   # 微软
+    'US.GOOGL',  # 谷歌
+    'US.AMZN',   # 亚马逊
+    'US.TSLA',   # 特斯拉
+    'US.META',   # Meta
+    'US.NVDA',   # 英伟达
+    'US.NFLX',   # 奈飞
+    'US.AMD',    # AMD
+    'US.CRM',    # Salesforce
+]
+
+
+
+# ==================== 期权过滤配置 ====================
+OPTION_FILTERS = {
+    # 港股默认配置
+    'hk_default': {
+        'min_volume': 10,           # 最小成交量
+        'min_turnover': 200000,      # 最小成交额(港币)
+        'min_price': 0.001,         # 最小期权价格
+        'max_price': 30,          # 最大期权价格
+        'min_days_to_expiry': 1,    # 最小到期天数
+        'max_days_to_expiry': 365,  # 最大到期天数
+        'enable_call': True,        # 监控看涨期权
+        'enable_put': True,         # 监控看跌期权
+        'min_importance_score': 60, # 最小重要性分数
+    },
+    
+    # 美股默认配置
+    'us_default': {
+        'min_volume': 50,           # 最小成交量(美股期权成交量通常更大)
+        'min_turnover': 50000,      # 最小成交额(美元)
+        'min_price': 0.01,          # 最小期权价格
+        'max_price': 100,           # 最大期权价格
+        'min_days_to_expiry': 1,    # 最小到期天数
+        'max_days_to_expiry': 365,  # 最大到期天数
+        'enable_call': True,        # 监控看涨期权
+        'enable_put': True,         # 监控看跌期权
+        'min_importance_score': 60, # 最小重要性分数
+    },
+    
+
+    
+    # 港股特定股票配置
+    'HK.00700': {  # 腾讯控股
+        'min_volume': 20,
+        'min_turnover': 200000,
+        'min_importance_score': 70,
+    },
+    
+    'HK.09988': {  # 阿里巴巴
+        'min_volume': 15,
+        'min_turnover': 120000,
+        'min_importance_score': 65,
+    },
+    
+    'HK.03690': {  # 美团
+        'min_volume': 15,
+        'min_turnover': 120000,
+        'min_importance_score': 65,
+    },
+    
+    # 美股特定股票配置
+    'US.AAPL': {  # 苹果
+        'min_volume': 100,
+        'min_turnover': 100000,
+        'min_importance_score': 70,
+    },
+    
+    'US.TSLA': {  # 特斯拉
+        'min_volume': 80,
+        'min_turnover': 80000,
+        'min_importance_score': 70,
+    },
+    
+    'US.NVDA': {  # 英伟达
+        'min_volume': 80,
+        'min_turnover': 80000,
+        'min_importance_score': 70,
+    },
+}
+
+# ==================== 大单监控配置 ====================
+BIG_TRADE_CONFIG = {
+    'enable': True,
+    'min_volume_threshold': 50,      # 最小成交量阈值
+    'min_turnover_threshold': 100000, # 最小成交额阈值(港币)
+    'notification_cooldown': 300,     # 通知冷却时间(秒)
+}
+
+# ==================== 通知配置 ====================
+NOTIFICATION = {
+    # 控制台通知
+    'enable_console': True,
+    
+    # Mac系统通知
+    'enable_mac_notification': True,
+    
+    # 邮件通知
+    'enable_email': False,
+    'email_config': {
+        'smtp_server': 'smtp.gmail.com',
+        'smtp_port': 587,
+        'username': '',  # 发送邮箱
+        'password': '',  # 邮箱密码或应用密码
+        'to_emails': [],  # 接收邮箱列表
+    },
+    
+    # 企业微信机器人通知
+    'enable_wework_bot': True,
+    'wework_config': {
+        'webhook_url': 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx',  # 主要webhook URL
+        'extra_webhook_urls': [
+            'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx'
+        ],  # 额外的webhook URL列表
+        'mentioned_list': [],  # @用户列表
+        'mentioned_mobile_list': [],  # @手机号列表
+        'enable_summary': True,  # 启用汇总通知
+        'summary_interval': 300,  # 汇总间隔(秒)
+    },
+    
+    # 通知频率控制
+    'notification_interval': 60,  # 同一期权通知间隔(秒)
+    'max_notifications_per_hour': 100,  # 每小时最大通知数
+}
+
+# ==================== 交易时间配置 ====================
+# 港股交易时间
+HK_TRADING_HOURS = {
+    'market_open': '09:30',
+    'market_close': '16:00',
+    'lunch_break_start': '12:00',
+    'lunch_break_end': '13:00',
+    'timezone': 'Asia/Hong_Kong',
+    'weekdays_only': True,  # 只在工作日开市
+    'update_data_off_hours': True,  # 非开市时间是否更新数据 (调试开关)
+}
+
+# 美股交易时间 (夏令时)
+US_TRADING_HOURS_DST = {
+    'market_open': '21:30',  # 美东时间09:30对应北京时间21:30
+    'market_close': '04:00',  # 美东时间16:00对应北京时间04:00+1天
+    'timezone': 'US/Eastern',
+    'weekdays_only': True,
+    'crosses_midnight': True,  # 跨越午夜
+    'update_data_off_hours': True,  # 非开市时间是否更新数据 (调试开关)
+}
+
+# 美股交易时间 (冬令时)
+US_TRADING_HOURS_STD = {
+    'market_open': '22:30',  # 美东时间09:30对应北京时间22:30
+    'market_close': '05:00',  # 美东时间16:00对应北京时间05:00+1天
+    'timezone': 'US/Eastern',
+    'weekdays_only': True,
+    'crosses_midnight': True,  # 跨越午夜
+    'update_data_off_hours': True,  # 非开市时间是否更新数据 (调试开关)
+}
+
+
+
+# ==================== 系统配置 ====================
+SYSTEM_CONFIG = {
+    # 日志配置
+    'log_level': 'INFO',
+    'log_file': 'logs/option_monitor_v2.log',
+    'log_max_size': 50 * 1024 * 1024,  # 50MB
+    'log_backup_count': 5,
+    'log_format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    
+    # 性能配置
+    'max_workers': 4,
+    'cache_size': 10000,
+    'cache_ttl': 300,  # 缓存TTL(秒)
+    'gc_interval': 3600,  # 垃圾回收间隔(秒)
+    
+    # 监控配置
+    'monitor_interval': 5,  # 监控间隔(秒)
+    'data_fetch_interval': 3,  # 数据获取间隔(秒)
+    'health_check_interval': 60,  # 健康检查间隔(秒)
+    
+    # Web界面配置
+    'web_host': '0.0.0.0',
+    'web_port': 8290,  # V2使用独立端口
+    'web_debug': False,
+    'web_auto_reload': False,
+    
+    # 缓存文件配置
+    'cache_dir': 'data/cache',
+    'stock_info_cache': 'data/stock_base_info_v2.json',
+    'option_chain_cache': 'data/option_chains_v2.json',
+    'price_cache': 'data/price_cache_v2.json',
+}
+
+# ==================== 分析配置 ====================
+ANALYSIS_CONFIG = {
+    # Greeks计算配置
+    'enable_greeks': True,
+    'risk_free_rate': 0.03,  # 无风险利率
+    'dividend_yield': 0.02,  # 股息率
+    
+    # 波动率配置
+    'volatility_window': 30,  # 历史波动率计算窗口(天)
+    'min_volatility': 0.1,   # 最小波动率
+    'max_volatility': 2.0,   # 最大波动率
+    
+    # 风险评估配置
+    'risk_thresholds': {
+        'low': 30,     # 低风险阈值
+        'medium': 60,  # 中风险阈值
+        'high': 80,    # 高风险阈值
+    },
+    
+    # 重要性评分配置
+    'importance_weights': {
+        'volume_weight': 0.3,      # 成交量权重
+        'turnover_weight': 0.3,    # 成交额权重
+        'moneyness_weight': 0.2,   # 价值状态权重
+        'time_weight': 0.1,        # 时间价值权重
+        'volatility_weight': 0.1,  # 波动率权重
+    },
+}
+
+# ==================== 辅助函数 ====================
+def get_market_type(stock_code: str) -> str:
+    """根据股票代码判断市场类型"""
+    if stock_code.startswith('HK.'):
+        return 'HK'
+    elif stock_code.startswith('US.'):
+        return 'US'
+    else:
+        # 默认返回港股
+        return 'HK'
+
+def get_stock_name(stock_code: str) -> str:
+    """获取股票名称"""
+    stock_names = {
+        # 港股
+        'HK.00700': '腾讯控股',
+        'HK.09988': '阿里巴巴',
+        'HK.03690': '美团',
+        'HK.01810': '小米集团',
+        'HK.09618': '京东集团',
+        'HK.02318': '中国平安',
+        'HK.00388': '香港交易所',
+        'HK.00981': '中芯国际',
+        'HK.02020': '安踏体育',
+        'HK.01024': '快手',
+        
+        # 美股
+        'US.AAPL': '苹果',
+        'US.MSFT': '微软',
+        'US.GOOGL': '谷歌',
+        'US.AMZN': '亚马逊',
+        'US.TSLA': '特斯拉',
+        'US.META': 'Meta',
+        'US.NVDA': '英伟达',
+        'US.NFLX': '奈飞',
+        'US.AMD': 'AMD',
+        'US.CRM': 'Salesforce',
+    }
+    return stock_names.get(stock_code, stock_code)
+
+def get_market_from_code(stock_code: str) -> str:
+    """从股票代码获取市场类型"""
+    if stock_code.startswith('HK.'):
+        return 'HK'
+    elif stock_code.startswith('US.'):
+        return 'US'
+    else:
+        return 'UNKNOWN'
+
+def is_us_dst() -> bool:
+    """判断当前是否为美国夏令时"""
+    from datetime import datetime
+    import calendar
+    
+    now = datetime.now()
+    year = now.year
+    
+    # 夏令时：3月第二个周日到11月第一个周日
+    # 3月第二个周日
+    march_second_sunday = None
+    for day in range(8, 15):  # 第二个周日在8-14日之间
+        if calendar.weekday(year, 3, day) == 6:  # 周日
+            march_second_sunday = day
+            break
+    
+    # 11月第一个周日
+    november_first_sunday = None
+    for day in range(1, 8):  # 第一个周日在1-7日之间
+        if calendar.weekday(year, 11, day) == 6:  # 周日
+            november_first_sunday = day
+            break
+    
+    if march_second_sunday and november_first_sunday:
+        dst_start = datetime(year, 3, march_second_sunday)
+        dst_end = datetime(year, 11, november_first_sunday)
+        return dst_start <= now < dst_end
+    
+    return False
+
+def is_hk_trading_time() -> bool:
+    """判断当前是否为港股交易时间"""
+    return is_market_trading_time('HK')
+
+def is_us_trading_time() -> bool:
+    """判断当前是否为美股交易时间"""
+    return is_market_trading_time('US')
+
+def is_market_trading_time(market: str) -> bool:
+    """判断指定市场是否在交易时间"""
+    from datetime import datetime
+    
+    try:
+        now = datetime.now()
+        current_time = now.strftime('%H:%M')
+        
+        if market == 'HK':
+            # 港股交易时间判断
+            if now.weekday() >= 5:  # 周六日
+                return False
+            
+            market_open = HK_TRADING_HOURS['market_open']
+            market_close = HK_TRADING_HOURS['market_close']
+            lunch_start = HK_TRADING_HOURS['lunch_break_start']
+            lunch_end = HK_TRADING_HOURS['lunch_break_end']
+            
+            # 上午时段：09:30-12:00
+            if market_open <= current_time < lunch_start:
+                return True
+            
+            # 下午时段：13:00-16:00
+            if lunch_end <= current_time < market_close:
+                return True
+            
+            return False
+            
+        elif market == 'US':
+            # 美股交易时间判断
+            if now.weekday() >= 5:  # 周六日
+                return False
+            
+            # 根据夏令时/冬令时选择交易时间
+            if is_us_dst():
+                trading_hours = US_TRADING_HOURS_DST
+            else:
+                trading_hours = US_TRADING_HOURS_STD
+            
+            market_open = trading_hours['market_open']
+            market_close = trading_hours['market_close']
+            
+            # 美股交易时间跨越午夜
+            if trading_hours.get('crosses_midnight', False):
+                # 当前时间在开市时间之后（当天）或收市时间之前（次日）
+                if current_time >= market_open or current_time < market_close:
+                    return True
+            else:
+                # 正常时间段
+                if market_open <= current_time < market_close:
+                    return True
+            
+            return False
+        
+        return False
+        
+    except Exception as e:
+        print(f"判断{market}市场交易时间时出错: {e}")
+        return False
+
+def should_send_to_extra_webhooks() -> bool:
+    """判断是否应该向额外的webhook发送消息（支持多市场）"""
+    try:
+        # 检查港股或美股是否有任一市场在交易时间
+        hk_trading = is_market_trading_time('HK')
+        us_trading = is_market_trading_time('US')
+        
+        # 任一市场在交易时间就发送额外webhook
+        return hk_trading or us_trading
+        
+    except Exception as e:
+        # 异常时默认为非交易时间，不发送额外webhook
+        print(f"判断开市时间时出错: {e}")
+        return False
+
+def should_update_data_off_hours(market: str) -> bool:
+    """判断指定市场是否允许在非开市时间更新数据"""
+    try:
+        if market == 'HK':
+            return HK_TRADING_HOURS.get('update_data_off_hours', True)
+        elif market == 'US':
+            # 根据夏令时/冬令时选择配置
+            if is_us_dst():
+                return US_TRADING_HOURS_DST.get('update_data_off_hours', True)
+            else:
+                return US_TRADING_HOURS_STD.get('update_data_off_hours', True)
+        else:
+            # 未知市场默认允许更新
+            return True
+    except Exception as e:
+        print(f"判断{market}市场非开市时间更新配置时出错: {e}")
+        return True
+
+def should_monitor_market(market: str) -> bool:
+    """判断是否应该监控指定市场（综合考虑交易时间和调试开关）"""
+    try:
+        is_trading = is_market_trading_time(market)
+        allow_off_hours = should_update_data_off_hours(market)
+        
+        # 如果在交易时间，总是监控
+        if is_trading:
+            return True
+        
+        # 如果不在交易时间，检查是否允许非开市时间更新
+        return allow_off_hours
+        
+    except Exception as e:
+        print(f"判断{market}市场监控状态时出错: {e}")
+        return True
+
+def validate_config():
+    """验证配置有效性"""
+    errors = []
+    
+    # 验证富途配置
+    if not FUTU_CONFIG.get('host'):
+        errors.append("富途API主机地址未配置")
+    
+    if not isinstance(FUTU_CONFIG.get('port'), int) or FUTU_CONFIG['port'] <= 0:
+        errors.append("富途API端口配置无效")
+    
+    # 验证监控股票
+    if not HK_MONITOR_STOCKS and not US_MONITOR_STOCKS:
+        errors.append("未配置监控股票")
+    
+    # 验证通知配置
+    if NOTIFICATION.get('enable_wework_bot'):
+        wework_config = NOTIFICATION.get('wework_config', {})
+        if not wework_config.get('webhook_url'):
+            errors.append("企业微信webhook URL未配置")
+    
+    if NOTIFICATION.get('enable_email'):
+        email_config = NOTIFICATION.get('email_config', {})
+        if not email_config.get('username') or not email_config.get('password'):
+            errors.append("邮件配置不完整")
+    
+    # 创建必要的目录
+    for dir_path in [
+        os.path.dirname(HK_DATABASE_CONFIG['db_path']),
+        os.path.dirname(US_DATABASE_CONFIG['db_path']),
+        os.path.dirname(SYSTEM_CONFIG['log_file']),
+        SYSTEM_CONFIG['cache_dir']
+    ]:
+        if dir_path and not os.path.exists(dir_path):
+            try:
+                os.makedirs(dir_path, exist_ok=True)
+            except Exception as e:
+                errors.append(f"无法创建目录 {dir_path}: {e}")
+    
+    return errors
+
+# ==================== 环境变量支持 ====================
+def load_from_env():
+    """从环境变量加载配置"""
+    # 富途配置
+    if os.getenv('FUTU_HOST'):
+        FUTU_CONFIG['host'] = os.getenv('FUTU_HOST')
+    
+    if os.getenv('FUTU_PORT'):
+        try:
+            FUTU_CONFIG['port'] = int(os.getenv('FUTU_PORT'))
+        except ValueError:
+            pass
+    
+    if os.getenv('FUTU_UNLOCK_PWD'):
+        FUTU_CONFIG['unlock_pwd'] = os.getenv('FUTU_UNLOCK_PWD')
+    
+    # 企业微信配置
+    if os.getenv('WEWORK_WEBHOOK_URL'):
+        NOTIFICATION['wework_config']['webhook_url'] = os.getenv('WEWORK_WEBHOOK_URL')
+    
+    # 邮件配置
+    if os.getenv('EMAIL_USERNAME'):
+        NOTIFICATION['email_config']['username'] = os.getenv('EMAIL_USERNAME')
+    
+    if os.getenv('EMAIL_PASSWORD'):
+        NOTIFICATION['email_config']['password'] = os.getenv('EMAIL_PASSWORD')
+
+# 自动加载环境变量
+load_from_env()
+
+
+
+if __name__ == '__main__':
+    # 配置验证
+    errors = validate_config()
+    if errors:
+        print("V2配置验证失败:")
+        for error in errors:
+            print(f"  - {error}")
+    else:
+        print("V2配置验证通过")
+        
+    # 显示配置摘要
+    print(f"\nV2系统配置摘要:")
+    print(f"  港股监控: {len(HK_MONITOR_STOCKS)} 只")
+    print(f"  美股监控: {len(US_MONITOR_STOCKS)} 只")
+    print(f"  富途API: {FUTU_CONFIG['host']}:{FUTU_CONFIG['port']}")
+    print(f"  港股数据库: {HK_DATABASE_CONFIG['db_path']}")
+    print(f"  美股数据库: {US_DATABASE_CONFIG['db_path']}")
+    print(f"  Web端口: {SYSTEM_CONFIG['web_port']}")
+    print(f"  缓存目录: {SYSTEM_CONFIG['cache_dir']}")
+    print(f"  大单监控: {'启用' if BIG_TRADE_CONFIG['enable'] else '禁用'}")
+    print(f"  通知方式: 控制台={NOTIFICATION['enable_console']}, Mac={NOTIFICATION['enable_mac_notification']}, 企微={NOTIFICATION['enable_wework_bot']}, 邮件={NOTIFICATION['enable_email']}")

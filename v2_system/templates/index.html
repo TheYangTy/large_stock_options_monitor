@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+
+{% block title %}多市场数据概览 - V2期权监控数据库{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">
+            <i class="bi bi-speedometer2"></i> 多市场数据库概览
+        </h1>
+    </div>
+</div>
+
+<!-- 港股统计 -->
+<div class="row mb-4">
+    <div class="col-12">
+        <h3 class="mb-3">
+            <i class="bi bi-flag"></i> 港股期权统计
+            <span class="badge bg-primary ms-2">HK Market</span>
+        </h3>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats h-100 border-primary">
+            <div class="card-body text-center">
+                <i class="bi bi-list-ol text-primary" style="font-size: 2rem;"></i>
+                <h3 class="mt-2 text-primary">{{ hk_stats.total_trades or 0 }}</h3>
+                <p class="card-text">港股总交易记录</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats h-100 border-success">
+            <div class="card-body text-center">
+                <i class="bi bi-calendar-day text-success" style="font-size: 2rem;"></i>
+                <h3 class="mt-2 text-success">{{ hk_stats.today_trades or 0 }}</h3>
+                <p class="card-text">港股今日交易</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats h-100 border-info">
+            <div class="card-body text-center">
+                <i class="bi bi-building text-info" style="font-size: 2rem;"></i>
+                <h3 class="mt-2 text-info">{{ hk_stats.stock_count or 0 }}</h3>
+                <p class="card-text">港股数量</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats h-100 border-warning">
+            <div class="card-body text-center">
+                <i class="bi bi-cash-stack text-warning" style="font-size: 2rem;"></i>
+                <h3 class="mt-2 text-warning">{{ "{:,.0f}".format(hk_stats.total_turnover or 0) }}</h3>
+                <p class="card-text">港股成交额(港币)</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 美股统计 -->
+<div class="row mb-4">
+    <div class="col-12">
+        <h3 class="mb-3">
+            <i class="bi bi-flag-usa"></i> 美股期权统计
+            <span class="badge bg-info ms-2">US Market</span>
+        </h3>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats h-100 border-info">
+            <div class="card-body text-center">
+                <i class="bi bi-list-ol text-info" style="font-size: 2rem;"></i>
+                <h3 class="mt-2 text-info">{{ us_stats.total_trades or 0 }}</h3>
+                <p class="card-text">美股总交易记录</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats h-100 border-success">
+            <div class="card-body text-center">
+                <i class="bi bi-calendar-day text-success" style="font-size: 2rem;"></i>
+                <h3 class="mt-2 text-success">{{ us_stats.today_trades or 0 }}</h3>
+                <p class="card-text">美股今日交易</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats h-100 border-primary">
+            <div class="card-body text-center">
+                <i class="bi bi-building text-primary" style="font-size: 2rem;"></i>
+                <h3 class="mt-2 text-primary">{{ us_stats.stock_count or 0 }}</h3>
+                <p class="card-text">美股数量</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card card-stats h-100 border-warning">
+            <div class="card-body text-center">
+                <i class="bi bi-cash-stack text-warning" style="font-size: 2rem;"></i>
+                <h3 class="mt-2 text-warning">${{ "{:,.0f}".format(us_stats.total_turnover or 0) }}</h3>
+                <p class="card-text">美股成交额(美元)</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 快速导航 -->
+<div class="row mb-4">
+    <div class="col-12">
+        <h4 class="mb-3">
+            <i class="bi bi-compass"></i> 快速导航
+        </h4>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-6 mb-3">
+        <div class="card border-primary">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">
+                    <i class="bi bi-flag"></i> 港股期权
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="card-text">查看港股期权交易数据和统计信息</p>
+                <div class="d-grid gap-2">
+                    <a href="{{ url_for('trades', market='HK') }}" class="btn btn-primary">
+                        <i class="bi bi-list-ul"></i> 港股交易记录
+                    </a>
+                    <a href="{{ url_for('stocks', market='HK') }}" class="btn btn-outline-primary">
+                        <i class="bi bi-bar-chart"></i> 港股统计
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6 mb-3">
+        <div class="card border-info">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0">
+                    <i class="bi bi-flag-usa"></i> 美股期权
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="card-text">查看美股期权交易数据和统计信息</p>
+                <div class="d-grid gap-2">
+                    <a href="{{ url_for('trades', market='US') }}" class="btn btn-info">
+                        <i class="bi bi-list-ul"></i> 美股交易记录
+                    </a>
+                    <a href="{{ url_for('stocks', market='US') }}" class="btn btn-outline-info">
+                        <i class="bi bi-bar-chart"></i> 美股统计
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 数据库信息 -->
+<div class="row">
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-database"></i> 港股数据库信息
+                </h5>
+            </div>
+            <div class="card-body">
+                <p><strong>数据库路径:</strong> <code>{{ hk_stats.database_path }}</code></p>
+                {% if hk_stats.earliest_record and hk_stats.latest_record %}
+                <p><strong>最早记录:</strong> {{ hk_stats.earliest_record[:19] }}</p>
+                <p><strong>最新记录:</strong> {{ hk_stats.latest_record[:19] }}</p>
+                {% else %}
+                <p class="text-muted">暂无港股数据</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-database"></i> 美股数据库信息
+                </h5>
+            </div>
+            <div class="card-body">
+                <p><strong>数据库路径:</strong> <code>{{ us_stats.database_path }}</code></p>
+                {% if us_stats.earliest_record and us_stats.latest_record %}
+                <p><strong>最早记录:</strong> {{ us_stats.earliest_record[:19] }}</p>
+                <p><strong>最新记录:</strong> {{ us_stats.latest_record[:19] }}</p>
+                {% else %}
+                <p class="text-muted">暂无美股数据</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 系统说明 -->
+<div class="row">
+    <div class="col-12">
+        <div class="alert alert-info">
+            <h5 class="alert-heading">
+                <i class="bi bi-info-circle"></i> 多市场监控系统说明
+            </h5>
+            <hr>
+            <ul class="mb-0">
+                <li><strong>港股期权:</strong> 数据以港币计价，交易时间为香港时间</li>
+                <li><strong>美股期权:</strong> 数据以美元计价，交易时间为美东时间(已转换为北京时间显示)</li>
+                <li><strong>数据来源:</strong> 富途API，支持实时期权数据获取</li>
+                <li><strong>数据库:</strong> 港股和美股数据分别存储在独立的数据库中</li>
+                <li><strong>监控模式:</strong> 支持单市场监控或多市场同时监控</li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 自动刷新统计数据
+function refreshStats() {
+    // 刷新港股统计
+    fetch('/api/stats?market=HK')
+        .then(response => response.json())
+        .then(data => {
+            if (!data.error) {
+                // 更新港股统计数字
+                const hkCards = document.querySelectorAll('.border-primary .text-primary h3, .border-success .text-success h3, .border-info .text-info h3');
+                if (hkCards[0]) hkCards[0].textContent = data.total_trades || 0;
+                if (hkCards[1]) hkCards[1].textContent = data.today_trades || 0;
+                if (hkCards[2]) hkCards[2].textContent = data.stock_count || 0;
+                
+                // 更新港股成交金额
+                const hkTurnover = document.querySelector('.border-warning .text-warning h3');
+                if (hkTurnover && hkTurnover.textContent.indexOf('$') === -1) {
+                    hkTurnover.textContent = new Intl.NumberFormat('zh-CN').format(data.total_turnover || 0);
+                }
+            }
+        })
+        .catch(error => console.error('刷新港股统计数据失败:', error));
+    
+    // 刷新美股统计
+    fetch('/api/stats?market=US')
+        .then(response => response.json())
+        .then(data => {
+            if (!data.error) {
+                // 更新美股统计数字
+                const usCards = document.querySelectorAll('.border-info .text-info h3');
+                if (usCards[1]) usCards[1].textContent = data.total_trades || 0;
+                
+                // 更新美股成交金额
+                const usTurnover = document.querySelector('.border-warning .text-warning h3');
+                if (usTurnover && usTurnover.textContent.indexOf('$') !== -1) {
+                    usTurnover.textContent = '$' + new Intl.NumberFormat('en-US').format(data.total_turnover || 0);
+                }
+            }
+        })
+        .catch(error => console.error('刷新美股统计数据失败:', error));
+}
+
+// 每30秒刷新一次统计数据
+setInterval(refreshStats, 30000);
+</script>
+{% endblock %}

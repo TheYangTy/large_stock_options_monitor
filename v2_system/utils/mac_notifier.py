@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Mac系统通知模块
+V2系统Mac系统通知模块
 """
 
 import subprocess
@@ -10,19 +10,19 @@ from typing import Dict, List
 
 
 class MacNotifier:
-    """Mac系统通知器"""
+    """V2系统Mac系统通知器"""
     
     def __init__(self):
-        self.logger = logging.getLogger('OptionMonitor.MacNotifier')
+        self.logger = logging.getLogger('V2OptionMonitor.MacNotifier')
         self.is_mac = platform.system() == 'Darwin'
         
         if not self.is_mac:
-            self.logger.warning("当前系统不是macOS，Mac通知功能将被禁用")
+            self.logger.warning("V2系统：当前系统不是macOS，Mac通知功能将被禁用")
     
     def send_notification(self, title: str, message: str, subtitle: str = ""):
-        """发送Mac系统通知"""
+        """V2系统发送Mac系统通知"""
         if not self.is_mac:
-            self.logger.debug("非Mac系统，跳过系统通知")
+            self.logger.debug("V2系统：非Mac系统，跳过系统通知")
             return False
         
         try:
@@ -45,21 +45,21 @@ class MacNotifier:
             )
             
             if result.returncode == 0:
-                self.logger.info(f"Mac通知发送成功: {title}")
+                self.logger.info(f"V2 Mac通知发送成功: {title}")
                 return True
             else:
-                self.logger.error(f"Mac通知发送失败: {result.stderr}")
+                self.logger.error(f"V2 Mac通知发送失败: {result.stderr}")
                 return False
                 
         except subprocess.TimeoutExpired:
-            self.logger.error("Mac通知发送超时")
+            self.logger.error("V2 Mac通知发送超时")
             return False
         except Exception as e:
-            self.logger.error(f"Mac通知发送异常: {e}")
+            self.logger.error(f"V2 Mac通知发送异常: {e}")
             return False
     
     def send_big_options_summary(self, big_options: List[Dict]):
-        """发送大单期权汇总通知"""
+        """V2系统发送大单期权汇总通知"""
         if not big_options:
             return
         
@@ -76,7 +76,7 @@ class MacNotifier:
             stock_stats[stock_code]['turnover'] += opt.get('turnover', 0)
         
         # 构建通知消息
-        title = "🚨 港股期权大单提醒"
+        title = "🚨 V2港股期权大单提醒"
         subtitle = f"发现 {total_count} 笔大单交易"
         
         # 构建详细消息

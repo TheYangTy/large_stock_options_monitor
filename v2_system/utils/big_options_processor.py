@@ -17,7 +17,7 @@ import sys
 
 # 添加V2系统路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import BIG_TRADE_CONFIG, HK_TRADING_HOURS, US_TRADING_HOURS_DST, US_TRADING_HOURS_STD, OPTION_FILTERS, SYSTEM_CONFIG, get_stock_name, get_stock_default_price
+from config import HK_TRADING_HOURS, US_TRADING_HOURS_DST, US_TRADING_HOURS_STD, OPTION_FILTERS, SYSTEM_CONFIG, get_stock_name, get_stock_default_price
 import futu as ft
 
 
@@ -352,20 +352,11 @@ class BigOptionsProcessor:
         return all_big_options
     
     def _should_notify(self, trade_info: Dict[str, Any]) -> bool:
-        """检查是否应该发送通知（避免重复通知）"""
+        """检查是否应该发送通知"""
         option_code = trade_info.get('option_code')
         current_time = datetime.now()
         
-        # 检查通知冷却时间
-        if option_code in self.notification_history:
-            last_notify_time = self.notification_history[option_code]
-            time_diff = (current_time - last_notify_time).total_seconds()
-            if time_diff < BIG_TRADE_CONFIG['notification_cooldown']:
-                self.logger.debug(f"V2期权 {option_code} 在冷却期内，距离上次通知 {time_diff:.0f}秒")
-                return False
-        
-        # 🔥 修复：传入的trade_info已经是满足大单条件的，不需要重复检查
-        # 直接更新通知历史并返回True
+        # 移除通知冷却逻辑，直接更新通知历史并返回True
         self.notification_history[option_code] = current_time
         self.logger.debug(f"V2期权 {option_code} 通过通知检查，更新通知历史")
         return True
@@ -984,11 +975,14 @@ class BigOptionsProcessor:
                     self._save_to_database(trade_info)
                     self.logger.debug(f"V2期权数据已保存: {option_code} (成交量:{current_volume}, diff:{volume_diff}, 成交额:{current_turnover:.0f})")
                     
-                    # 检查是否满足大单条件
+                    # 检查是否满足大单条件 - 根据市场使用相应的过滤配置
+                    filter_key = 'us_default' if self.market == 'US' else 'hk_default'
+                    option_filter = OPTION_FILTERS[filter_key]
+                    
                     is_big_trade = (
-                        current_volume >= BIG_TRADE_CONFIG['min_volume_threshold'] and 
-                        current_turnover >= BIG_TRADE_CONFIG['min_turnover_threshold'] and
-                        volume_diff > 0  # 成交量有增长（这个条件现在总是True，因为上面已经过滤了）
+                        current_volume >= option_filter['min_volume'] and 
+                        current_turnover >= option_filter['min_turnover'] and
+                        volume_diff >= option_filter['min_volume_diff']
                     )
                     
                     if is_big_trade:

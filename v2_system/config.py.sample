@@ -4,6 +4,7 @@ V2系统独立配置文件
 """
 
 import os
+from pickle import FALSE
 from typing import Dict, Any, List
 
 # ==================== 富途API配置 ====================
@@ -55,43 +56,14 @@ def get_database_config(market: str = 'HK') -> Dict[str, Any]:
     else:
         return HK_DATABASE_CONFIG
 
-# ==================== 监控股票配置 ====================
-# 港股监控列表
-HK_MONITOR_STOCKS = [
-    'HK.00700',  # 腾讯控股
-    'HK.09988',  # 阿里巴巴
-    'HK.03690',  # 美团
-    'HK.01810',  # 小米集团
-    'HK.09618',  # 京东集团
-    'HK.02318',  # 中国平安
-    'HK.00388',  # 香港交易所
-    'HK.00981',  # 中芯国际
-    'HK.02020',  # 安踏体育
-    'HK.01024',  # 快手
-]
-
-# 美股监控列表
-US_MONITOR_STOCKS = [
-    'US.AAPL',   # 苹果
-    'US.MSFT',   # 微软
-    'US.GOOGL',  # 谷歌
-    'US.AMZN',   # 亚马逊
-    'US.TSLA',   # 特斯拉
-    'US.META',   # Meta
-    'US.NVDA',   # 英伟达
-    'US.NFLX',   # 奈飞
-    'US.AMD',    # AMD
-    'US.CRM',    # Salesforce
-]
-
-
 
 # ==================== 期权过滤配置 ====================
 OPTION_FILTERS = {
     # 港股默认配置
     'hk_default': {
-        'min_volume': 10,           # 最小成交量
-        'min_turnover': 200000,      # 最小成交额(港币)
+        'min_volume': 50,           # 最小成交量
+        'min_turnover': 300000,      # 最小成交额(港币)
+        'min_volume_diff': 80,       # 最小增量成交量(张)
         'min_price': 0.001,         # 最小期权价格
         'max_price': 30,          # 最大期权价格
         'min_days_to_expiry': 1,    # 最小到期天数
@@ -104,7 +76,8 @@ OPTION_FILTERS = {
     # 美股默认配置
     'us_default': {
         'min_volume': 50,           # 最小成交量(美股期权成交量通常更大)
-        'min_turnover': 50000,      # 最小成交额(美元)
+        'min_turnover': 100000,      # 最小成交额(美元)
+        'min_volume_diff': 80,      # 最小增量成交量(张)
         'min_price': 0.01,          # 最小期权价格
         'max_price': 100,           # 最大期权价格
         'min_days_to_expiry': 1,    # 最小到期天数
@@ -114,54 +87,10 @@ OPTION_FILTERS = {
         'min_importance_score': 60, # 最小重要性分数
     },
     
-
     
-    # 港股特定股票配置
-    'HK.00700': {  # 腾讯控股
-        'min_volume': 20,
-        'min_turnover': 200000,
-        'min_importance_score': 70,
-    },
-    
-    'HK.09988': {  # 阿里巴巴
-        'min_volume': 15,
-        'min_turnover': 120000,
-        'min_importance_score': 65,
-    },
-    
-    'HK.03690': {  # 美团
-        'min_volume': 15,
-        'min_turnover': 120000,
-        'min_importance_score': 65,
-    },
-    
-    # 美股特定股票配置
-    'US.AAPL': {  # 苹果
-        'min_volume': 100,
-        'min_turnover': 100000,
-        'min_importance_score': 70,
-    },
-    
-    'US.TSLA': {  # 特斯拉
-        'min_volume': 80,
-        'min_turnover': 80000,
-        'min_importance_score': 70,
-    },
-    
-    'US.NVDA': {  # 英伟达
-        'min_volume': 80,
-        'min_turnover': 80000,
-        'min_importance_score': 70,
-    },
 }
 
-# ==================== 大单监控配置 ====================
-BIG_TRADE_CONFIG = {
-    'enable': True,
-    'min_volume_threshold': 50,      # 最小成交量阈值
-    'min_turnover_threshold': 100000, # 最小成交额阈值(港币)
-    'notification_cooldown': 300,     # 通知冷却时间(秒)
-}
+
 
 # ==================== 通知配置 ====================
 NOTIFICATION = {
@@ -184,7 +113,7 @@ NOTIFICATION = {
     # 企业微信机器人通知
     'enable_wework_bot': True,
     'wework_config': {
-        'webhook_url': 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx',  # 主要webhook URL
+        'webhook_url': 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xx',  # 主要webhook URL
         'extra_webhook_urls': [
             'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx'
         ],  # 额外的webhook URL列表
@@ -218,7 +147,7 @@ US_TRADING_HOURS_DST = {
     'timezone': 'US/Eastern',
     'weekdays_only': True,
     'crosses_midnight': True,  # 跨越午夜
-    'update_data_off_hours': True,  # 非开市时间是否更新数据 (调试开关)
+    'update_data_off_hours': False,  # 非开市时间是否更新数据 (调试开关)
 }
 
 # 美股交易时间 (冬令时)
@@ -228,7 +157,7 @@ US_TRADING_HOURS_STD = {
     'timezone': 'US/Eastern',
     'weekdays_only': True,
     'crosses_midnight': True,  # 跨越午夜
-    'update_data_off_hours': True,  # 非开市时间是否更新数据 (调试开关)
+    'update_data_off_hours': False,  # 非开市时间是否更新数据 (调试开关)
 }
 
 
@@ -266,6 +195,83 @@ SYSTEM_CONFIG = {
     'price_cache': 'data/price_cache_v2.json',
 }
 
+# ==================== 股票默认价格配置 ====================
+STOCK_DEFAULT_PRICE = {
+    # 港股默认价格
+    'HK.00700': 647.0,  # 腾讯控股
+    'HK.09988': 154.0,   # 阿里巴巴-SW
+    'HK.03690': 98.0,  # 美团
+    'HK.09888': 112.0,  # 百度
+    'HK.01810': 56.0,   # 小米集团
+    'HK.09618': 130.0,  # 京东集团
+    'HK.02318': 56.0,   # 中国平安
+    'HK.00388': 451.0,  # 香港交易所
+    'HK.00981': 63.0,   # 中芯国际
+    'HK.02020': 95.0,   # 安踏体育
+    'HK.01024': 76.0,   # 快手
+    'HK.03750': 478.0,  # 宁德时代
+    'HK.01347': 52.0,   # 华虹半导体
+    'HK.09626': 213.0,  # 哔哩哔哩-W
+    'HK.02269': 39.0,   # 药明康德
+    'HK.02015': 100.0,  # 理想汽车-W
+    
+    # 美股默认价格
+    'US.AAPL': 237.0,   # 苹果
+    'US.MSFT': 515.0,   # 微软
+    'US.GOOGL': 252.0,  # 谷歌
+    'US.AMZN': 231.0,   # 亚马逊
+    'US.TSLA': 410.0,   # 特斯拉
+    'US.META': 764.0,   # Meta
+    'US.NVDA': 177.0,   # 英伟达
+    'US.NFLX': 1202.0,   # 奈飞
+    'US.AMD': 161.0,    # AMD
+    'US.CRM': 242.0,    # Salesforce
+    'US.QS': 10.0,    # Salesforce
+    
+    # 通用默认价格
+    'default': 100.0,   # 未配置股票的默认价格
+}
+
+def get_stock_default_price(stock_code: str) -> float:
+    """获取股票默认价格"""
+    return STOCK_DEFAULT_PRICE.get(stock_code, STOCK_DEFAULT_PRICE['default'])
+
+# ==================== 监控股票配置 ====================
+# 港股监控列表
+HK_MONITOR_STOCKS = [
+    'HK.00700',  # 腾讯控股
+    'HK.09988',  # 阿里巴巴
+    'HK.03690',  # 美团
+    'HK.09888',  # 百度
+    'HK.01810',  # 小米集团
+    'HK.09618',  # 京东集团
+    'HK.02318',  # 中国平安
+    'HK.00388',  # 香港交易所
+    'HK.00981',  # 中芯国际
+    'HK.02020',  # 安踏体育
+    'HK.01024',  # 快手
+    'HK.03750',  # 宁德时代,
+    'HK.01347',  # 华虹半导体
+    'HK.09626',  # 哔哩哔哩-W
+    'HK.02269',  # 药明康德
+    'HK.02015',  # 理想汽车-W
+]
+
+# 美股监控列表
+US_MONITOR_STOCKS = [
+    'US.AAPL',   # 苹果
+    'US.MSFT',   # 微软
+    'US.GOOGL',  # 谷歌
+    'US.AMZN',   # 亚马逊
+    'US.TSLA',   # 特斯拉
+    'US.META',   # Meta
+    'US.NVDA',   # 英伟达
+    'US.NFLX',   # 奈飞
+    'US.AMD',    # AMD
+    'US.CRM',    # Salesforce
+]
+
+
 # ==================== 辅助函数 ====================
 def get_market_type(stock_code: str) -> str:
     """根据股票代码判断市场类型"""
@@ -284,6 +290,7 @@ def get_stock_name(stock_code: str) -> str:
         'HK.00700': '腾讯控股',
         'HK.09988': '阿里巴巴',
         'HK.03690': '美团',
+        'HK.09888': '百度',
         'HK.01810': '小米集团',
         'HK.09618': '京东集团',
         'HK.02318': '中国平安',
@@ -291,6 +298,11 @@ def get_stock_name(stock_code: str) -> str:
         'HK.00981': '中芯国际',
         'HK.02020': '安踏体育',
         'HK.01024': '快手',
+        'HK.03750': '宁德时代',
+        'HK.01347': '华虹半导体',
+        'HK.09626': '哔哩哔哩-W',
+        'HK.02269': '药明康德',
+        'HK.02015': '理想汽车-W',
         
         # 美股
         'US.AAPL': '苹果',
@@ -555,5 +567,5 @@ if __name__ == '__main__':
     print(f"  美股数据库: {US_DATABASE_CONFIG['db_path']}")
     print(f"  Web端口: {SYSTEM_CONFIG['web_port']}")
     print(f"  缓存目录: {SYSTEM_CONFIG['cache_dir']}")
-    print(f"  大单监控: {'启用' if BIG_TRADE_CONFIG['enable'] else '禁用'}")
+    print(f"  期权过滤: 港股最小成交额={OPTION_FILTERS['hk_default']['min_turnover']}, 美股最小成交额={OPTION_FILTERS['us_default']['min_turnover']}")
     print(f"  通知方式: 控制台={NOTIFICATION['enable_console']}, Mac={NOTIFICATION['enable_mac_notification']}, 企微={NOTIFICATION['enable_wework_bot']}, 邮件={NOTIFICATION['enable_email']}")

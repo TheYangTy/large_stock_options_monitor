@@ -92,6 +92,9 @@
                         <th>成交额(美元)</th>
                         <th>涨跌幅</th>
                         <th>到期日</th>
+                        <th>持仓</th>
+                        <th>净持仓</th>
+                        <th>净持仓变化</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -163,10 +166,34 @@
                                 <span class="text-muted">-</span>
                             {% endif %}
                         </td>
+                        <td>
+                            {% if trade.option_open_interest %}
+                                {{ "{:,}".format(trade.option_open_interest) }}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if trade.option_net_open_interest %}
+                                {{ "{:,}".format(trade.option_net_open_interest) }}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% set net_oi_diff = trade.option_net_open_interest_diff|int if trade.option_net_open_interest_diff else 0 %}
+                            {% if net_oi_diff > 0 %}
+                                <span class="text-success">+{{ "{:,}".format(net_oi_diff) }}</span>
+                            {% elif net_oi_diff < 0 %}
+                                <span class="text-danger">{{ "{:,}".format(net_oi_diff) }}</span>
+                            {% else %}
+                                <span class="text-muted">0</span>
+                            {% endif %}
+                        </td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="10" class="text-center text-muted py-4">
+                        <td colspan="13" class="text-center text-muted py-4">
                             <i class="bi bi-inbox"></i> 暂无美股期权交易记录
                         </td>
                     </tr>

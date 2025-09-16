@@ -246,7 +246,11 @@ def get_trades_data(market='HK', page=1, per_page=50, stock_code='', option_code
             # 获取数据
             data_query = f"""
                 SELECT ot.*, 
-                       COALESCE(si.stock_name, ot.stock_name, '') as stock_name
+                       COALESCE(si.stock_name, ot.stock_name, '') as stock_name,
+                       ot.option_open_interest,
+                       ot.option_net_open_interest,
+                       ot.open_interest_diff as option_open_interest_diff,
+                       ot.net_open_interest_diff as option_net_open_interest_diff
                 FROM option_trades ot
                 LEFT JOIN stock_info si ON ot.stock_code = si.stock_code
                 {where_clause}

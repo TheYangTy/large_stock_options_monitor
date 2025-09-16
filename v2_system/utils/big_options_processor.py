@@ -1010,46 +1010,6 @@ class BigOptionsProcessor:
             self.logger.error(f"V2批量获取期权大单交易失败: {e}")
             return []
     
-    def save_big_options_summary(self, big_options: List[Dict[str, Any]]):
-        """V2系统保存大单期权汇总到JSON文件"""
-        try:
-            summary = {
-                'update_time': datetime.now().isoformat(),
-                'total_count': len(big_options),
-                'system_version': 'V2',
-                'filter_conditions': BIG_TRADE_CONFIG,
-                'big_options': big_options
-            }
-            
-            if big_options:
-                summary['statistics'] = self._calculate_statistics(big_options)
-            
-            def json_serializer(obj):
-                """处理NumPy类型的JSON序列化器"""
-                import numpy as np
-                if isinstance(obj, np.integer):
-                    return int(obj)
-                elif isinstance(obj, np.floating):
-                    return float(obj)
-                elif isinstance(obj, np.ndarray):
-                    return obj.tolist()
-                elif isinstance(obj, pd.Series):
-                    return obj.tolist()
-                elif isinstance(obj, pd.DataFrame):
-                    return obj.to_dict()
-                else:
-                    return str(obj)
-            
-            # 数据现在统一存储在数据库中，不再保存到JSON文件
-            # with open(self.json_file, 'w', encoding='utf-8') as f:
-            #     json.dump(summary, f, ensure_ascii=False, indent=2, default=json_serializer)
-            
-            self.logger.info(f"V2大单期权汇总已保存: {len(big_options)}笔交易")
-            
-        except Exception as e:
-            self.logger.error(f"V2保存大单期权汇总失败: {e}")
-            self.logger.error(traceback.format_exc())
-    
     def _calculate_statistics(self, big_options: List[Dict[str, Any]]) -> Dict[str, Any]:
         """V2系统计算统计信息"""
         if not big_options:

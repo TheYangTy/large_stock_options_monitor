@@ -282,43 +282,15 @@ def get_trades_data(market='HK', page=1, per_page=50, stock_code='', option_code
 
 def get_stock_stats(market='HK'):
     """获取股票统计信息，按Put和Call分别统计
-    只统计今天开盘时段的数据，每个期权只取最新的一个数据
+    统计今天的数据，每个期权只取最新的一个数据
     """
     try:
         db_manager = get_db_manager(market)
         with sqlite3.connect(db_manager.db_path) as conn:
             cursor = conn.cursor()
             
-            # 确定统计日期范围
-            now = datetime.now()
-            current_hour = now.hour
-            
-            # 判断开盘时段
-            if market == 'HK':
-                # 港股开盘时间：9:30-12:00, 13:00-16:00
-                if current_hour < 9:
-                    # 开盘前，统计前一天
-                    target_date = (now - timedelta(days=1)).strftime('%Y-%m-%d')
-                else:
-                    # 开盘后，统计今天
-                    target_date = now.strftime('%Y-%m-%d')
-                # 港股开盘时段
-                trading_start = f"{target_date} 09:30:00"
-                trading_end = f"{target_date} 16:00:00"
-            else:
-                # 美股开盘时间：21:30-04:00 (北京时间)
-                if current_hour < 21:
-                    # 开盘前，统计前一天
-                    target_date = (now - timedelta(days=1)).strftime('%Y-%m-%d')
-                    trading_start = f"{target_date} 21:30:00"
-                    next_day = (datetime.strptime(target_date, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
-                    trading_end = f"{next_day} 04:00:00"
-                else:
-                    # 开盘后，统计今天
-                    target_date = now.strftime('%Y-%m-%d')
-                    trading_start = f"{target_date} 21:30:00"
-                    next_day = (now + timedelta(days=1)).strftime('%Y-%m-%d')
-                    trading_end = f"{next_day} 04:00:00"
+            # 简化逻辑：直接统计今天的数据，不限制具体时间段
+            target_date = datetime.now().strftime('%Y-%m-%d')
             
             # 查询每个期权的最新记录，然后按股票和期权类型汇总
             cursor.execute("""
@@ -336,7 +308,7 @@ def get_stock_stats(market='HK'):
                             ORDER BY ot.timestamp DESC
                         ) as rn
                     FROM option_trades ot
-                    WHERE ot.timestamp >= ? AND ot.timestamp <= ?
+                    WHERE DATE(ot.timestamp) = ?
                 )
                 SELECT 
                     lo.stock_code,
@@ -352,7 +324,7 @@ def get_stock_stats(market='HK'):
                 WHERE lo.rn = 1
                 GROUP BY lo.stock_code, lo.option_type
                 ORDER BY total_turnover DESC
-            """, (trading_start, trading_end))
+            """, (target_date,))
             
             stocks = []
             for row in cursor.fetchall():

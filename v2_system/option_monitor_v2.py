@@ -260,7 +260,6 @@ class V2OptionMonitor:
                 
                 # 保存数据（保存原始数据，确保下次比较时有正确的基准）
                 self.data_handler.save_option_data(big_options)
-                self.big_options_processor.save_big_options_summary(big_options_with_diff)
                 
                 # 更新历史数据（按期权代码更新，保持全量缓存字典）
                 if not hasattr(self, 'previous_options') or self.previous_options is None:

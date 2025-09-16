@@ -266,35 +266,6 @@ SYSTEM_CONFIG = {
     'price_cache': 'data/price_cache_v2.json',
 }
 
-# ==================== 分析配置 ====================
-ANALYSIS_CONFIG = {
-    # Greeks计算配置
-    'enable_greeks': True,
-    'risk_free_rate': 0.03,  # 无风险利率
-    'dividend_yield': 0.02,  # 股息率
-    
-    # 波动率配置
-    'volatility_window': 30,  # 历史波动率计算窗口(天)
-    'min_volatility': 0.1,   # 最小波动率
-    'max_volatility': 2.0,   # 最大波动率
-    
-    # 风险评估配置
-    'risk_thresholds': {
-        'low': 30,     # 低风险阈值
-        'medium': 60,  # 中风险阈值
-        'high': 80,    # 高风险阈值
-    },
-    
-    # 重要性评分配置
-    'importance_weights': {
-        'volume_weight': 0.3,      # 成交量权重
-        'turnover_weight': 0.3,    # 成交额权重
-        'moneyness_weight': 0.2,   # 价值状态权重
-        'time_weight': 0.1,        # 时间价值权重
-        'volatility_weight': 0.1,  # 波动率权重
-    },
-}
-
 # ==================== 辅助函数 ====================
 def get_market_type(stock_code: str) -> str:
     """根据股票代码判断市场类型"""

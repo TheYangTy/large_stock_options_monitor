@@ -207,23 +207,11 @@ class V2OptionMonitor:
                 return price
             else:
                 # 使用默认价格
-                default_prices = {
-                    # 港股默认价格
-                    'HK.00700': 600.0, 'HK.09988': 80.0, 'HK.03690': 120.0,
-                    'HK.01810': 15.0, 'HK.09618': 120.0, 'HK.02318': 40.0,
-                    'HK.00388': 300.0, 'HK.00981': 60.0, 'HK.01024': 50.0,
-                    
-                    # 美股默认价格
-                    'US.AAPL': 180.0, 'US.MSFT': 350.0, 'US.GOOGL': 140.0,
-                    'US.AMZN': 140.0, 'US.TSLA': 250.0, 'US.META': 300.0,
-                    'US.NVDA': 450.0, 'US.NFLX': 400.0, 'US.AMD': 120.0,
-                    'US.CRM': 200.0
-                }
-                return default_prices.get(stock_code, 100.0)
+                return get_stock_default_price(stock_code)
                 
         except Exception as e:
             self.logger.error(f"V2系统获取{stock_code}股价失败: {e}")
-            return 100.0  # 默认价格
+            return get_stock_default_price(stock_code)  # 使用config中的默认价格
     
     def scan_big_options(self) -> List[Dict]:
         """扫描大单期权"""

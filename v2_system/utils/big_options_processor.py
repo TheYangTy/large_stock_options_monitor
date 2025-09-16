@@ -17,7 +17,7 @@ import sys
 
 # 添加V2系统路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import BIG_TRADE_CONFIG, HK_TRADING_HOURS, US_TRADING_HOURS_DST, US_TRADING_HOURS_STD, OPTION_FILTERS, SYSTEM_CONFIG, get_stock_name
+from config import BIG_TRADE_CONFIG, HK_TRADING_HOURS, US_TRADING_HOURS_DST, US_TRADING_HOURS_STD, OPTION_FILTERS, SYSTEM_CONFIG, get_stock_name, get_stock_default_price
 import futu as ft
 
 
@@ -483,7 +483,7 @@ class BigOptionsProcessor:
                         result[stock_code] = self.stock_price_cache[stock_code]
                     else:
                         # 使用默认价格和config.py中的get_stock_name函数获取股票名称
-                        default_price = 100.0
+                        default_price = get_stock_default_price(stock_code)
                         stock_name = get_stock_name(stock_code)
                         result[stock_code] = {'price': default_price, 'name': stock_name}
                         self.logger.warning(f"V2API调用失败时使用get_stock_name获取股票名称: {stock_code} = {stock_name}")
@@ -496,7 +496,7 @@ class BigOptionsProcessor:
                         result[stock_code] = self.stock_price_cache[stock_code]
                     else:
                         # 使用默认价格和config.py中的get_stock_name函数获取股票名称
-                        default_price = 100.0
+                        default_price = get_stock_default_price(stock_code)
                         stock_name = get_stock_name(stock_code)
                         result[stock_code] = {'price': default_price, 'name': stock_name}
                         self.logger.warning(f"V2API调用失败时使用get_stock_name获取股票名称: {stock_code} = {stock_name}")
@@ -598,37 +598,12 @@ class BigOptionsProcessor:
                 
                 return stock_info
             else:
-                # 使用默认股票信息
-                default_stocks = {
-                    # 港股
-                    'HK.00700': {'price': 600.0, 'name': '腾讯控股'},
-                    'HK.09988': {'price': 80.0, 'name': '阿里巴巴-SW'},
-                    'HK.03690': {'price': 120.0, 'name': '美团-W'},
-                    'HK.01810': {'price': 12.0, 'name': '小米集团-W'},
-                    'HK.09618': {'price': 120.0, 'name': '京东集团-SW'},
-                    'HK.02318': {'price': 40.0, 'name': '中国平安'},
-                    'HK.00388': {'price': 300.0, 'name': '香港交易所'},
-                    'HK.03690': {'price': 120.0, 'name': '美团-W'},
-                    'HK.01810': {'price': 12.0, 'name': '小米集团-W'},
-                    'HK.09618': {'price': 120.0, 'name': '京东集团-SW'},
-                    'HK.02318': {'price': 40.0, 'name': '中国平安'},
-                    'HK.00388': {'price': 300.0, 'name': '香港交易所'},
-                    
-                    # 美股
-                    'US.AAPL': {'price': 150.0, 'name': '苹果'},
-                    'US.MSFT': {'price': 300.0, 'name': '微软'},
-                    'US.GOOGL': {'price': 120.0, 'name': '谷歌'},
-                    'US.AMZN': {'price': 130.0, 'name': '亚马逊'},
-                    'US.TSLA': {'price': 250.0, 'name': '特斯拉'},
-                    'US.META': {'price': 280.0, 'name': 'Meta'},
-                    'US.NVDA': {'price': 400.0, 'name': '英伟达'},
-                    'US.NFLX': {'price': 400.0, 'name': '奈飞'},
-                    'US.AMD': {'price': 120.0, 'name': 'AMD'},
-                    'US.CRM': {'price': 200.0, 'name': 'Salesforce'}
-                },
+                # 使用config中的默认股票信息
+                default_price = get_stock_default_price(stock_code)
+                stock_name = get_stock_name(stock_code)
                 
-                if stock_code in default_stocks:
-                    stock_info = default_stocks[stock_code]
+                if default_price > 0:
+                    stock_info = {'price': default_price, 'name': stock_name}
                     self.logger.info(f"V2使用默认股票信息: {stock_code} = {stock_info['price']} ({stock_info['name']})")
                     self.stock_price_cache[stock_code] = stock_info
                     self.price_cache_time[stock_code] = current_time
@@ -709,19 +684,7 @@ class BigOptionsProcessor:
                         self.logger.info(f"V2 {stock_code}当前股价(来自文件缓存): {current_price}")
                     else:
                         # 使用默认价格
-                        if market_type == 'HK':
-                            default_prices = {
-                                'HK.00700': 600.0, 'HK.09988': 80.0, 'HK.03690': 120.0,
-                                'HK.01810': 15.0, 'HK.09618': 120.0, 'HK.02318': 40.0,
-                                'HK.00388': 300.0
-                            }
-                        else:  # US market
-                            default_prices = {
-                                'US.AAPL': 150.0, 'US.TSLA': 250.0, 'US.NVDA': 400.0,
-                                'US.MSFT': 300.0, 'US.GOOGL': 120.0, 'US.AMZN': 130.0,
-                                'US.META': 280.0, 'US.NFLX': 400.0
-                            }
-                        current_price = default_prices.get(stock_code, 100.0)
+                        current_price = get_stock_default_price(stock_code)
                         self.logger.info(f"V2 {stock_code}当前股价(使用默认价格): {current_price}")
                 
                 # 基于股价设定期权执行价格过滤范围
@@ -916,13 +879,8 @@ class BigOptionsProcessor:
                 except Exception as e:
                     self.logger.warning(f"V2批量获取股票价格失败: {e}")
                     # 使用默认价格
-                    default_prices = {
-                        'HK.00700': 600.0, 'HK.09988': 130.0, 'HK.03690': 120.0,
-                        'HK.01810': 15.0, 'HK.09618': 120.0, 'HK.02318': 40.0,
-                        'HK.00388': 300.0, 'HK.00981': 60.0, 'HK.01024': 50.0
-                    }
                     for stock_code in unique_stocks:
-                        stock_prices[stock_code] = default_prices.get(stock_code, 100.0)
+                        stock_prices[stock_code] = get_stock_default_price(stock_code)
                         stock_names[stock_code] = get_stock_name(stock_code)
             
             # 批量获取历史成交量数据

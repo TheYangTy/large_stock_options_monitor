@@ -281,31 +281,78 @@ def get_trades_data(market='HK', page=1, per_page=50, stock_code='', option_code
         return {'trades': [], 'pagination': {}}
 
 def get_stock_stats(market='HK'):
-    """获取股票统计信息，按Put和Call分别统计"""
+    """获取股票统计信息，按Put和Call分别统计
+    只统计今天开盘时段的数据，每个期权只取最新的一个数据
+    """
     try:
         db_manager = get_db_manager(market)
         with sqlite3.connect(db_manager.db_path) as conn:
             cursor = conn.cursor()
             
+            # 确定统计日期范围
+            now = datetime.now()
+            current_hour = now.hour
+            
+            # 判断开盘时段
+            if market == 'HK':
+                # 港股开盘时间：9:30-12:00, 13:00-16:00
+                if current_hour < 9:
+                    # 开盘前，统计前一天
+                    target_date = (now - timedelta(days=1)).strftime('%Y-%m-%d')
+                else:
+                    # 开盘后，统计今天
+                    target_date = now.strftime('%Y-%m-%d')
+                # 港股开盘时段
+                trading_start = f"{target_date} 09:30:00"
+                trading_end = f"{target_date} 16:00:00"
+            else:
+                # 美股开盘时间：21:30-04:00 (北京时间)
+                if current_hour < 21:
+                    # 开盘前，统计前一天
+                    target_date = (now - timedelta(days=1)).strftime('%Y-%m-%d')
+                    trading_start = f"{target_date} 21:30:00"
+                    next_day = (datetime.strptime(target_date, '%Y-%m-%d') + timedelta(days=1)).strftime('%Y-%m-%d')
+                    trading_end = f"{next_day} 04:00:00"
+                else:
+                    # 开盘后，统计今天
+                    target_date = now.strftime('%Y-%m-%d')
+                    trading_start = f"{target_date} 21:30:00"
+                    next_day = (now + timedelta(days=1)).strftime('%Y-%m-%d')
+                    trading_end = f"{next_day} 04:00:00"
+            
+            # 查询每个期权的最新记录，然后按股票和期权类型汇总
             cursor.execute("""
+                WITH latest_options AS (
+                    SELECT 
+                        ot.stock_code,
+                        ot.option_code,
+                        ot.option_type,
+                        ot.volume,
+                        ot.turnover,
+                        ot.price,
+                        ot.timestamp,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY ot.option_code 
+                            ORDER BY ot.timestamp DESC
+                        ) as rn
+                    FROM option_trades ot
+                    WHERE ot.timestamp >= ? AND ot.timestamp <= ?
+                )
                 SELECT 
-                    ot.stock_code,
-                    COALESCE(si.stock_name, ot.stock_name, '') as stock_name,
-                    CASE 
-                        WHEN ot.option_code LIKE '%C%' THEN 'Call'
-                        WHEN ot.option_code LIKE '%P%' THEN 'Put'
-                        ELSE 'Unknown'
-                    END as option_type,
+                    lo.stock_code,
+                    COALESCE(si.stock_name, '') as stock_name,
+                    COALESCE(lo.option_type, 'Unknown') as option_type,
                     COUNT(*) as trade_count,
-                    SUM(ot.volume) as total_volume,
-                    SUM(ot.turnover) as total_turnover,
-                    AVG(ot.price) as avg_price,
-                    MAX(ot.timestamp) as latest_trade
-                FROM option_trades ot
-                LEFT JOIN stock_info si ON ot.stock_code = si.stock_code
-                GROUP BY ot.stock_code, option_type
-                ORDER BY ot.stock_code, total_turnover DESC
-            """)
+                    SUM(lo.volume) as total_volume,
+                    SUM(lo.turnover) as total_turnover,
+                    AVG(lo.price) as avg_price,
+                    MAX(lo.timestamp) as latest_trade
+                FROM latest_options lo
+                LEFT JOIN stock_info si ON lo.stock_code = si.stock_code
+                WHERE lo.rn = 1
+                GROUP BY lo.stock_code, lo.option_type
+                ORDER BY total_turnover DESC
+            """, (trading_start, trading_end))
             
             stocks = []
             for row in cursor.fetchall():
@@ -314,13 +361,15 @@ def get_stock_stats(market='HK'):
                     'stock_name': row[1],
                     'option_type': row[2],
                     'trade_count': row[3],
-                    'total_volume': row[4],
-                    'total_turnover': row[5],
+                    'total_volume': row[4] or 0,
+                    'total_turnover': row[5] or 0,
                     'avg_price': round(row[6], 3) if row[6] else 0,
                     'latest_trade': row[7]
                 }
                 if stock['latest_trade']:
                     stock['formatted_latest'] = datetime.fromisoformat(stock['latest_trade']).strftime('%Y-%m-%d %H:%M:%S')
+                else:
+                    stock['formatted_latest'] = ''
                 stocks.append(stock)
             
             return stocks

@@ -76,7 +76,12 @@ class MultiMarketMonitor:
         """注册活跃市场"""
         with self.market_turn_lock:
             self.active_markets.add(market)
-            self.logger.info(f"市场 {market} 已注册，当前活跃市场: {self.active_markets}")
+            # 如果是第一个注册的市场，设为当前轮次
+            if len(self.active_markets) == 1:
+                self.current_turn = market
+                self.logger.info(f"市场 {market} 已注册为首个市场，设为当前轮次")
+            else:
+                self.logger.info(f"市场 {market} 已注册，当前活跃市场: {self.active_markets}")
     
     def unregister_market(self, market: str):
         """注销市场"""
@@ -197,6 +202,13 @@ class MultiMarketMonitor:
                             self.logger.warning("⚠️ 港股监控未能获取API权限，跳过本次扫描")
                     else:
                         self.logger.info("🔒 港股非交易时间且调试开关已关闭，跳过数据更新")
+                        # 港股跳过时，需要切换API权限给其他市场
+                        if len(self.active_markets) > 1:
+                            with self.market_turn_lock:
+                                if self.current_turn == 'HK':
+                                    if 'US' in self.active_markets:
+                                        self.current_turn = 'US'
+                                        self.logger.info("🔄 港股跳过扫描，切换API权限给美股")
                     
                     # 等待下次扫描
                     self.logger.info(f"港股监控等待{scan_interval}秒(约{scan_interval/60:.1f}分钟)后下次扫描")
@@ -265,6 +277,13 @@ class MultiMarketMonitor:
                             self.logger.warning("⚠️ 美股监控未能获取API权限，跳过本次扫描")
                     else:
                         self.logger.info("🔒 美股非交易时间且调试开关已关闭，跳过数据更新")
+                        # 美股跳过时，需要切换API权限给其他市场
+                        if len(self.active_markets) > 1:
+                            with self.market_turn_lock:
+                                if self.current_turn == 'US':
+                                    if 'HK' in self.active_markets:
+                                        self.current_turn = 'HK'
+                                        self.logger.info("🔄 美股跳过扫描，切换API权限给港股")
                     
                     # 等待下次扫描
                     self.logger.info(f"美股监控等待{scan_interval}秒(约{scan_interval/60:.1f}分钟)后下次扫描")

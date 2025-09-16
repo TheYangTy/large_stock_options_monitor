@@ -485,12 +485,26 @@ class V2Notifier:
                     volume_diff = option.get('volume_diff', 0)
                     turnover = option.get('turnover', 0)
                     
-                    # 构建期权详情行
+                    # 获取未平仓合约数变化信息
+                    open_interest_diff = option.get('open_interest_diff', 0)
+                    net_open_interest_diff = option.get('net_open_interest_diff', 0)
+                    
+                    # 构建期权详情行（包含未平仓合约数变化）
                     option_detail = (
                         f"  {i}. {option_code}: {option_type}, "
                         f"{price:.3f}×{volume:,}张, +{volume_diff:,}张, "
                         f"{turnover/10000:.1f}万"
                     )
+                    
+                    # 添加未平仓合约数变化信息（如果有变化）
+                    if open_interest_diff != 0 or net_open_interest_diff != 0:
+                        oi_parts = []
+                        if open_interest_diff != 0:
+                            oi_parts.append(f"持仓{open_interest_diff:+,}")
+                        if net_open_interest_diff != 0:
+                            oi_parts.append(f"净持仓{net_open_interest_diff:+,}")
+                        if oi_parts:
+                            option_detail += f", {', '.join(oi_parts)}"
                     message_parts.append(option_detail)
             
             message = "\n".join(message_parts)

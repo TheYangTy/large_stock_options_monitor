@@ -681,9 +681,9 @@ class BigOptionsProcessor:
                 # 基于股价设定期权执行价格过滤范围
                 # 根据市场类型选择对应的过滤器
                 if market_type == 'US':
-                    price_range = OPTION_FILTERS['us_default'].get('price_range', 0.2)
+                    price_range = OPTION_FILTERS['us_default'].get('price_range', 0.4)
                 else:
-                    price_range = OPTION_FILTERS['hk_default'].get('price_range', 0.2)
+                    price_range = OPTION_FILTERS['hk_default'].get('price_range', 0.4)
                 price_lower = current_price * (1 - price_range)
                 price_upper = current_price * (1 + price_range)
                 self.logger.info(f"V2筛选价格范围: {price_lower:.2f} - {price_upper:.2f} (±{price_range*100}%)")
@@ -874,19 +874,28 @@ class BigOptionsProcessor:
                         stock_prices[stock_code] = get_stock_default_price(stock_code)
                         stock_names[stock_code] = get_stock_name(stock_code)
             
-            # 批量获取历史成交量数据
+            # 批量获取历史成交量和未平仓合约数数据
             option_previous_volumes = {}
+            option_previous_open_interests = {}
             for option_code in option_codes:
                 try:
-                    # 从快照数据中获取当前成交量
+                    # 从快照数据中获取当前数据
                     option_row = snapshot_data[snapshot_data['code'] == option_code]
                     if not option_row.empty:
                         current_volume = int(option_row.iloc[0].get('volume', 0))
+                        current_open_interest = int(option_row.iloc[0].get('option_open_interest', 0))
+                        
+                        # 获取历史成交量
                         previous_volume = self.db_manager.get_previous_option_volume(option_code, current_volume)
                         option_previous_volumes[option_code] = previous_volume
+                        
+                        # 获取历史未平仓合约数
+                        previous_open_interest, previous_net_open_interest = self.db_manager.get_previous_option_open_interest(option_code, current_open_interest)
+                        option_previous_open_interests[option_code] = (previous_open_interest, previous_net_open_interest)
                 except Exception as e:
-                    self.logger.debug(f"V2获取{option_code}历史成交量失败: {e}")
+                    self.logger.debug(f"V2获取{option_code}历史数据失败: {e}")
                     option_previous_volumes[option_code] = 0
+                    option_previous_open_interests[option_code] = (0, 0)
             
             # 处理每个期权的快照数据
             for _, row in snapshot_data.iterrows():
@@ -903,6 +912,10 @@ class BigOptionsProcessor:
                     last_price = float(row.get('last_price', 0))
                     change_rate = float(row.get('change_rate', 0))
                     update_time = str(row.get('update_time', datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                    
+                    # 获取未平仓合约数（新增字段）
+                    current_open_interest = int(row.get('option_open_interest', 0))
+                    current_net_open_interest = int(row.get('option_net_open_interest', 0))
                     
                     # 🔥 过滤成交量为0的期权，减少磁盘消耗
                     if current_volume <= 0:
@@ -935,9 +948,14 @@ class BigOptionsProcessor:
                     price_diff = strike_price - current_stock_price if current_stock_price else 0
                     price_diff_pct = (price_diff / current_stock_price) * 100 if current_stock_price else 0
                     
-                    # 获取历史成交量
+                    # 获取历史成交量和未平仓合约数
                     previous_volume = option_previous_volumes.get(option_code, 0)
                     volume_diff = current_volume - previous_volume
+                    
+                    # 获取历史未平仓合约数并计算变化
+                    previous_open_interest, previous_net_open_interest = option_previous_open_interests.get(option_code, (0, 0))
+                    open_interest_diff = current_open_interest - previous_open_interest
+                    net_open_interest_diff = current_net_open_interest - previous_net_open_interest
                     
                     # 🔥 修复：只有当成交量真正有变化时才保存和检测大单
                     if volume_diff <= 0:
@@ -968,6 +986,10 @@ class BigOptionsProcessor:
                         'price_diff_pct': price_diff_pct,
                         'volume_diff': volume_diff,
                         'last_volume': previous_volume,
+                        'option_open_interest': current_open_interest,
+                        'option_net_open_interest': current_net_open_interest,
+                        'open_interest_diff': open_interest_diff,
+                        'net_open_interest_diff': net_open_interest_diff,
                         'direction': 'Unknown'  # 批量模式下暂不获取方向信息
                     }
                     

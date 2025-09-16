@@ -75,6 +75,10 @@ class V2DatabaseManager:
                         price_diff_pct REAL,
                         volume_diff INTEGER,
                         last_volume INTEGER,
+                        option_open_interest INTEGER DEFAULT 0,
+                        option_net_open_interest INTEGER DEFAULT 0,
+                        open_interest_diff INTEGER DEFAULT 0,
+                        net_open_interest_diff INTEGER DEFAULT 0,
                         data_type TEXT DEFAULT 'v2_current',
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(option_code, timestamp)
@@ -134,8 +138,10 @@ class V2DatabaseManager:
                         stock_code, stock_name, option_code, trade_date, timestamp,
                         price, volume, turnover, change_rate, strike_price,
                         option_type, expiry_date, stock_price, price_diff,
-                        price_diff_pct, volume_diff, last_volume, data_type
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        price_diff_pct, volume_diff, last_volume, 
+                        option_open_interest, option_net_open_interest,
+                        open_interest_diff, net_open_interest_diff, data_type
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     trade_data.get('stock_code'),
                     trade_data.get('stock_name'),
@@ -154,6 +160,10 @@ class V2DatabaseManager:
                     trade_data.get('price_diff_pct'),
                     trade_data.get('volume_diff'),
                     trade_data.get('last_volume'),
+                    trade_data.get('option_open_interest', 0),
+                    trade_data.get('option_net_open_interest', 0),
+                    trade_data.get('open_interest_diff', 0),
+                    trade_data.get('net_open_interest_diff', 0),
                     trade_data.get('data_type', 'v2_current')
                 ))
                 
@@ -208,6 +218,10 @@ class V2DatabaseManager:
                         trade_data.get('price_diff_pct'),
                         trade_data.get('volume_diff'),
                         trade_data.get('last_volume'),
+                        trade_data.get('option_open_interest', 0),
+                        trade_data.get('option_net_open_interest', 0),
+                        trade_data.get('open_interest_diff', 0),
+                        trade_data.get('net_open_interest_diff', 0),
                         trade_data.get('data_type', 'v2_current')
                     ))
                 
@@ -216,8 +230,10 @@ class V2DatabaseManager:
                         stock_code, stock_name, option_code, trade_date, timestamp,
                         price, volume, turnover, change_rate, strike_price,
                         option_type, expiry_date, stock_price, price_diff,
-                        price_diff_pct, volume_diff, last_volume, data_type
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        price_diff_pct, volume_diff, last_volume, 
+                        option_open_interest, option_net_open_interest,
+                        open_interest_diff, net_open_interest_diff, data_type
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', records)
                 
                 conn.commit()
@@ -292,6 +308,45 @@ class V2DatabaseManager:
         except Exception as e:
             self.logger.debug(f"V2获取期权{option_code}上一条记录成交量失败: {e}")
             return 0
+    
+    def get_previous_option_open_interest(self, option_code: str, current_open_interest: int, trade_date: Optional[str] = None) -> tuple:
+        """获取指定期权的历史未平仓合约数，返回(previous_open_interest, previous_net_open_interest)"""
+        try:
+            if trade_date is None:
+                trade_date = datetime.now().date()
+            elif isinstance(trade_date, str):
+                trade_date = datetime.strptime(trade_date, '%Y-%m-%d').date()
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                    SELECT option_open_interest, option_net_open_interest FROM option_trades 
+                    WHERE option_code = ? AND trade_date = ?
+                    ORDER BY timestamp DESC
+                    LIMIT 1
+                ''', (option_code, trade_date))
+                
+                result = cursor.fetchone()
+                if result:
+                    last_open_interest = result[0] or 0
+                    last_net_open_interest = result[1] or 0
+                    
+                    # 如果当前未平仓合约数与最新记录相同，说明没有变化
+                    if current_open_interest == last_open_interest:
+                        self.logger.debug(f"V2期权{option_code}未平仓合约数无变化: {current_open_interest}")
+                        return current_open_interest, last_net_open_interest  # 返回相同值，diff为0
+                    else:
+                        self.logger.debug(f"V2期权{option_code}未平仓合约数变化: {last_open_interest} -> {current_open_interest}")
+                        return last_open_interest, last_net_open_interest
+                else:
+                    # 没有历史记录，这是第一次记录
+                    self.logger.debug(f"V2期权{option_code}首次记录未平仓合约数: {current_open_interest}")
+                    return 0, 0
+                
+        except Exception as e:
+            self.logger.debug(f"V2获取期权{option_code}历史未平仓合约数失败: {e}")
+            return 0, 0
     
     def get_today_all_option_volumes(self, trade_date: Optional[str] = None) -> Dict[str, int]:
         """获取当日所有期权的最新成交量"""

@@ -30,6 +30,71 @@ def get_db_manager(market='HK'):
     """根据市场获取数据库管理器"""
     return us_db_manager if market == 'US' else hk_db_manager
 
+def get_market_open_time(market='HK'):
+    """获取市场开盘时间，复用config中的配置"""
+    from config import HK_TRADING_HOURS, US_TRADING_HOURS_DST, US_TRADING_HOURS_STD, is_us_dst
+    
+    if market == 'HK':
+        return HK_TRADING_HOURS['market_open'] + ':00'
+    elif market == 'US':
+        if is_us_dst():
+            return US_TRADING_HOURS_DST['market_open'] + ':00'
+        else:
+            return US_TRADING_HOURS_STD['market_open'] + ':00'
+    return '09:30:00'
+
+def get_trading_dates(market='HK'):
+    """根据市场和当前时间获取统计日期和对比日期
+    复用config中的交易时间判断逻辑
+    返回: (current_date, compare_date, is_trading)
+    """
+    from config import is_market_trading_time, HK_TRADING_HOURS, US_TRADING_HOURS_DST, US_TRADING_HOURS_STD, is_us_dst
+    
+    now = datetime.now()
+    is_trading = is_market_trading_time(market)
+    
+    if is_trading:
+        # 开盘中：显示当日数据，对比上一交易日
+        if market == 'US':
+            # 美股跨日处理：根据夏令时/冬令时获取收盘时间
+            if is_us_dst():
+                market_close = US_TRADING_HOURS_DST['market_close']
+            else:
+                market_close = US_TRADING_HOURS_STD['market_close']
+            
+            # 如果当前时间在收盘时间前（次日凌晨），算作前一天的交易
+            if now.time() <= datetime.strptime(market_close, '%H:%M').time():
+                current_date = (now - timedelta(days=1)).strftime('%Y-%m-%d')
+                compare_date = (now - timedelta(days=2)).strftime('%Y-%m-%d')
+            else:
+                current_date = now.strftime('%Y-%m-%d')
+                compare_date = (now - timedelta(days=1)).strftime('%Y-%m-%d')
+        else:
+            # 港股正常处理
+            current_date = now.strftime('%Y-%m-%d')
+            compare_date = (now - timedelta(days=1)).strftime('%Y-%m-%d')
+    else:
+        # 开盘前：显示上一交易日数据，对比上上交易日
+        if market == 'US':
+            # 美股：根据当前时间判断
+            if is_us_dst():
+                market_open = US_TRADING_HOURS_DST['market_open']
+            else:
+                market_open = US_TRADING_HOURS_STD['market_open']
+            
+            if now.time() <= datetime.strptime(market_open, '%H:%M').time():
+                current_date = (now - timedelta(days=1)).strftime('%Y-%m-%d')
+                compare_date = (now - timedelta(days=2)).strftime('%Y-%m-%d')
+            else:
+                current_date = (now - timedelta(days=1)).strftime('%Y-%m-%d')
+                compare_date = (now - timedelta(days=2)).strftime('%Y-%m-%d')
+        else:
+            # 港股：显示昨天的数据
+            current_date = (now - timedelta(days=1)).strftime('%Y-%m-%d')
+            compare_date = (now - timedelta(days=2)).strftime('%Y-%m-%d')
+    
+    return current_date, compare_date, is_trading
+
 @app.route('/')
 def index():
     """主页 - 显示数据概览"""
@@ -286,21 +351,36 @@ def get_trades_data(market='HK', page=1, per_page=50, stock_code='', option_code
 
 def get_stock_stats(market='HK'):
     """获取股票统计信息，按Put和Call分别统计
-    统计今天的数据，每个期权只取最新的一个数据
-    净持仓变化汇总 = 今天股票净持仓汇总 - 昨天股票净持仓汇总
+    根据当前时间和市场开盘状态决定统计逻辑：
+    - 开盘前：显示上一交易日数据，对比上上交易日
+    - 开盘后：显示当日开盘至今数据，对比上一交易日
     """
     try:
         db_manager = get_db_manager(market)
         with sqlite3.connect(db_manager.db_path) as conn:
             cursor = conn.cursor()
             
-            # 获取今天和昨天的日期
-            today = datetime.now().strftime('%Y-%m-%d')
-            yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+            # 根据市场和当前时间确定统计日期和对比日期
+            current_date, compare_date, is_trading = get_trading_dates(market)
             
-            # 查询今天和昨天的数据，计算股票粒度的净持仓变化
-            cursor.execute("""
-                WITH today_latest AS (
+            # 根据是否在交易时间调整查询条件
+            if is_trading:
+                # 开盘后：查询当日开盘至今的数据
+                time_condition_current = "DATE(ot.timestamp) = ? AND TIME(ot.timestamp) >= ?"
+                time_condition_compare = "DATE(ot.timestamp) = ?"
+                market_open_time = get_market_open_time(market)
+                current_params = [current_date, market_open_time]
+                compare_params = [compare_date]
+            else:
+                # 开盘前：查询完整交易日数据
+                time_condition_current = "DATE(ot.timestamp) = ?"
+                time_condition_compare = "DATE(ot.timestamp) = ?"
+                current_params = [current_date]
+                compare_params = [compare_date]
+            
+            # 查询当前期间和对比期间的数据，计算股票粒度的净持仓变化
+            cursor.execute(f"""
+                WITH current_latest AS (
                     SELECT 
                         ot.stock_code,
                         ot.option_code,
@@ -316,9 +396,9 @@ def get_stock_stats(market='HK'):
                             ORDER BY ot.timestamp DESC
                         ) as rn
                     FROM option_trades ot
-                    WHERE DATE(ot.timestamp) = ?
+                    WHERE {time_condition_current}
                 ),
-                yesterday_latest AS (
+                compare_latest AS (
                     SELECT 
                         ot.stock_code,
                         ot.option_code,
@@ -330,50 +410,50 @@ def get_stock_stats(market='HK'):
                             ORDER BY ot.timestamp DESC
                         ) as rn
                     FROM option_trades ot
-                    WHERE DATE(ot.timestamp) = ?
+                    WHERE {time_condition_compare}
                 ),
-                today_summary AS (
+                current_summary AS (
                     SELECT 
-                        tl.stock_code,
-                        tl.option_type,
+                        cl.stock_code,
+                        cl.option_type,
                         COUNT(*) as trade_count,
-                        SUM(tl.volume) as total_volume,
-                        SUM(tl.turnover) as total_turnover,
-                        AVG(tl.price) as avg_price,
-                        MAX(tl.timestamp) as latest_trade,
-                        SUM(COALESCE(tl.option_open_interest, 0)) as total_open_interest,
-                        SUM(COALESCE(tl.option_net_open_interest, 0)) as today_total_net_open_interest
-                    FROM today_latest tl
-                    WHERE tl.rn = 1
-                    GROUP BY tl.stock_code, tl.option_type
+                        SUM(cl.volume) as total_volume,
+                        SUM(cl.turnover) as total_turnover,
+                        AVG(cl.price) as avg_price,
+                        MAX(cl.timestamp) as latest_trade,
+                        SUM(COALESCE(cl.option_open_interest, 0)) as total_open_interest,
+                        SUM(COALESCE(cl.option_net_open_interest, 0)) as current_total_net_open_interest
+                    FROM current_latest cl
+                    WHERE cl.rn = 1
+                    GROUP BY cl.stock_code, cl.option_type
                 ),
-                yesterday_summary AS (
+                compare_summary AS (
                     SELECT 
-                        yl.stock_code,
-                        yl.option_type,
-                        SUM(COALESCE(yl.option_net_open_interest, 0)) as yesterday_total_net_open_interest
-                    FROM yesterday_latest yl
-                    WHERE yl.rn = 1
-                    GROUP BY yl.stock_code, yl.option_type
+                        cl.stock_code,
+                        cl.option_type,
+                        SUM(COALESCE(cl.option_net_open_interest, 0)) as compare_total_net_open_interest
+                    FROM compare_latest cl
+                    WHERE cl.rn = 1
+                    GROUP BY cl.stock_code, cl.option_type
                 )
                 SELECT 
-                    ts.stock_code,
+                    cs.stock_code,
                     COALESCE(si.stock_name, '') as stock_name,
-                    COALESCE(ts.option_type, 'Unknown') as option_type,
-                    ts.trade_count,
-                    ts.total_volume,
-                    ts.total_turnover,
-                    ts.avg_price,
-                    ts.latest_trade,
-                    ts.total_open_interest,
-                    ts.today_total_net_open_interest,
-                    COALESCE(ys.yesterday_total_net_open_interest, 0) as yesterday_total_net_open_interest,
-                    (ts.today_total_net_open_interest - COALESCE(ys.yesterday_total_net_open_interest, 0)) as net_open_interest_change
-                FROM today_summary ts
-                LEFT JOIN yesterday_summary ys ON ts.stock_code = ys.stock_code AND ts.option_type = ys.option_type
-                LEFT JOIN stock_info si ON ts.stock_code = si.stock_code
-                ORDER BY ts.total_turnover DESC
-            """, (today, yesterday))
+                    COALESCE(cs.option_type, 'Unknown') as option_type,
+                    cs.trade_count,
+                    cs.total_volume,
+                    cs.total_turnover,
+                    cs.avg_price,
+                    cs.latest_trade,
+                    cs.total_open_interest,
+                    cs.current_total_net_open_interest,
+                    COALESCE(cms.compare_total_net_open_interest, 0) as compare_total_net_open_interest,
+                    (cs.current_total_net_open_interest - COALESCE(cms.compare_total_net_open_interest, 0)) as net_open_interest_change
+                FROM current_summary cs
+                LEFT JOIN compare_summary cms ON cs.stock_code = cms.stock_code AND cs.option_type = cms.option_type
+                LEFT JOIN stock_info si ON cs.stock_code = si.stock_code
+                ORDER BY cs.total_turnover DESC
+            """, current_params + compare_params)
             
             stocks = []
             for row in cursor.fetchall():
@@ -388,11 +468,14 @@ def get_stock_stats(market='HK'):
                     'latest_trade': row[7],
                     'total_open_interest': row[8] or 0,
                     'total_net_open_interest': row[9] or 0,
-                    'yesterday_total_net_open_interest': row[10] or 0,
-                    'total_net_open_interest_diff': row[11] or 0  # 这是正确的股票粒度净持仓变化
+                    'compare_total_net_open_interest': row[10] or 0,
+                    'total_net_open_interest_diff': row[11] or 0  # 正确的股票粒度净持仓变化
                 }
                 if stock['latest_trade']:
-                    stock['formatted_latest'] = datetime.fromisoformat(stock['latest_trade']).strftime('%Y-%m-%d %H:%M:%S')
+                    try:
+                        stock['formatted_latest'] = datetime.fromisoformat(str(stock['latest_trade'])).strftime('%Y-%m-%d %H:%M:%S')
+                    except:
+                        stock['formatted_latest'] = str(stock['latest_trade'])
                 else:
                     stock['formatted_latest'] = ''
                 stocks.append(stock)

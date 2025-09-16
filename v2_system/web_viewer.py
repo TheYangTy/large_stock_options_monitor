@@ -287,18 +287,20 @@ def get_trades_data(market='HK', page=1, per_page=50, stock_code='', option_code
 def get_stock_stats(market='HK'):
     """获取股票统计信息，按Put和Call分别统计
     统计今天的数据，每个期权只取最新的一个数据
+    净持仓变化汇总 = 今天股票净持仓汇总 - 昨天股票净持仓汇总
     """
     try:
         db_manager = get_db_manager(market)
         with sqlite3.connect(db_manager.db_path) as conn:
             cursor = conn.cursor()
             
-            # 简化逻辑：直接统计今天的数据，不限制具体时间段
-            target_date = datetime.now().strftime('%Y-%m-%d')
+            # 获取今天和昨天的日期
+            today = datetime.now().strftime('%Y-%m-%d')
+            yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
             
-            # 查询每个期权的最新记录，然后按股票和期权类型汇总
+            # 查询今天和昨天的数据，计算股票粒度的净持仓变化
             cursor.execute("""
-                WITH latest_options AS (
+                WITH today_latest AS (
                     SELECT 
                         ot.stock_code,
                         ot.option_code,
@@ -307,28 +309,71 @@ def get_stock_stats(market='HK'):
                         ot.turnover,
                         ot.price,
                         ot.timestamp,
+                        ot.option_open_interest,
+                        ot.option_net_open_interest,
                         ROW_NUMBER() OVER (
                             PARTITION BY ot.option_code 
                             ORDER BY ot.timestamp DESC
                         ) as rn
                     FROM option_trades ot
                     WHERE DATE(ot.timestamp) = ?
+                ),
+                yesterday_latest AS (
+                    SELECT 
+                        ot.stock_code,
+                        ot.option_code,
+                        ot.option_type,
+                        ot.option_open_interest,
+                        ot.option_net_open_interest,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY ot.option_code 
+                            ORDER BY ot.timestamp DESC
+                        ) as rn
+                    FROM option_trades ot
+                    WHERE DATE(ot.timestamp) = ?
+                ),
+                today_summary AS (
+                    SELECT 
+                        tl.stock_code,
+                        tl.option_type,
+                        COUNT(*) as trade_count,
+                        SUM(tl.volume) as total_volume,
+                        SUM(tl.turnover) as total_turnover,
+                        AVG(tl.price) as avg_price,
+                        MAX(tl.timestamp) as latest_trade,
+                        SUM(COALESCE(tl.option_open_interest, 0)) as total_open_interest,
+                        SUM(COALESCE(tl.option_net_open_interest, 0)) as today_total_net_open_interest
+                    FROM today_latest tl
+                    WHERE tl.rn = 1
+                    GROUP BY tl.stock_code, tl.option_type
+                ),
+                yesterday_summary AS (
+                    SELECT 
+                        yl.stock_code,
+                        yl.option_type,
+                        SUM(COALESCE(yl.option_net_open_interest, 0)) as yesterday_total_net_open_interest
+                    FROM yesterday_latest yl
+                    WHERE yl.rn = 1
+                    GROUP BY yl.stock_code, yl.option_type
                 )
                 SELECT 
-                    lo.stock_code,
+                    ts.stock_code,
                     COALESCE(si.stock_name, '') as stock_name,
-                    COALESCE(lo.option_type, 'Unknown') as option_type,
-                    COUNT(*) as trade_count,
-                    SUM(lo.volume) as total_volume,
-                    SUM(lo.turnover) as total_turnover,
-                    AVG(lo.price) as avg_price,
-                    MAX(lo.timestamp) as latest_trade
-                FROM latest_options lo
-                LEFT JOIN stock_info si ON lo.stock_code = si.stock_code
-                WHERE lo.rn = 1
-                GROUP BY lo.stock_code, lo.option_type
-                ORDER BY total_turnover DESC
-            """, (target_date,))
+                    COALESCE(ts.option_type, 'Unknown') as option_type,
+                    ts.trade_count,
+                    ts.total_volume,
+                    ts.total_turnover,
+                    ts.avg_price,
+                    ts.latest_trade,
+                    ts.total_open_interest,
+                    ts.today_total_net_open_interest,
+                    COALESCE(ys.yesterday_total_net_open_interest, 0) as yesterday_total_net_open_interest,
+                    (ts.today_total_net_open_interest - COALESCE(ys.yesterday_total_net_open_interest, 0)) as net_open_interest_change
+                FROM today_summary ts
+                LEFT JOIN yesterday_summary ys ON ts.stock_code = ys.stock_code AND ts.option_type = ys.option_type
+                LEFT JOIN stock_info si ON ts.stock_code = si.stock_code
+                ORDER BY ts.total_turnover DESC
+            """, (today, yesterday))
             
             stocks = []
             for row in cursor.fetchall():
@@ -340,7 +385,11 @@ def get_stock_stats(market='HK'):
                     'total_volume': row[4] or 0,
                     'total_turnover': row[5] or 0,
                     'avg_price': round(row[6], 3) if row[6] else 0,
-                    'latest_trade': row[7]
+                    'latest_trade': row[7],
+                    'total_open_interest': row[8] or 0,
+                    'total_net_open_interest': row[9] or 0,
+                    'yesterday_total_net_open_interest': row[10] or 0,
+                    'total_net_open_interest_diff': row[11] or 0  # 这是正确的股票粒度净持仓变化
                 }
                 if stock['latest_trade']:
                     stock['formatted_latest'] = datetime.fromisoformat(stock['latest_trade']).strftime('%Y-%m-%d %H:%M:%S')

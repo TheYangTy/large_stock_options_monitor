@@ -45,6 +45,9 @@
                         <th>总成交量(张)</th>
                         <th>总成交额(美元)</th>
                         <th>平均价格</th>
+                        <th>持仓汇总</th>
+                        <th>净持仓汇总</th>
+                        <th>净持仓变化汇总</th>
                         <th>最新交易时间</th>
                         <th>操作</th>
                     </tr>
@@ -79,6 +82,30 @@
                         </td>
                         <td>${{ "%.3f"|format(stock.avg_price or 0) }}</td>
                         <td>
+                            {% if stock.total_open_interest %}
+                                {{ "{:,}".format(stock.total_open_interest) }}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if stock.total_net_open_interest %}
+                                {{ "{:,}".format(stock.total_net_open_interest) }}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% set net_oi_diff = stock.total_net_open_interest_diff|int if stock.total_net_open_interest_diff else 0 %}
+                            {% if net_oi_diff > 0 %}
+                                <span class="text-success">+{{ "{:,}".format(net_oi_diff) }}</span>
+                            {% elif net_oi_diff < 0 %}
+                                <span class="text-danger">{{ "{:,}".format(net_oi_diff) }}</span>
+                            {% else %}
+                                <span class="text-muted">0</span>
+                            {% endif %}
+                        </td>
+                        <td>
                             {% if stock.formatted_latest %}
                                 <small>{{ stock.formatted_latest }}</small>
                             {% else %}
@@ -94,7 +121,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="10" class="text-center text-muted py-4">
+                        <td colspan="13" class="text-center text-muted py-4">
                             <i class="bi bi-inbox"></i> 暂无美股期权数据
                         </td>
                     </tr>
